@@ -988,39 +988,6 @@ class MongoClient(common.BaseObject, Generic[_DocumentType]):
             self._encrypter = _Encrypter(self, self._options.auto_encryption_opts)
         self._timeout = self._options.timeout
 
-        # Initialize native client for FFI-based operations
-        self._init_native_client(seeds)
-
-    def _init_native_client(self, seeds: Collection[tuple[str, int]]) -> None:
-        """Initialize the native FFI client."""
-        from pymongo.native_bindings import NativeSyncMongoClient, is_available
-
-        if not is_available():
-            self._native_client = None
-            return
-
-        # Build hosts string from seeds (NativeSyncMongoClient expects "host:port,host:port,...")
-        hosts = ",".join(f"{host}:{port}" for host, port in seeds)
-
-        # Extract auth and TLS options
-        opts = self._options
-        pool_opts = opts.pool_options
-
-        creds = pool_opts._credentials
-        # Pass hosts string directly - NativeSyncMongoClient detects ":" means it's already host:port
-        self._native_client = NativeSyncMongoClient(
-            hosts,  # Already includes port, will be passed through since it contains ":"
-            port=27017,  # Ignored when host contains ":"
-            appName=pool_opts.appname,
-            directConnection=opts.direct_connection or False,
-            serverSelectionTimeoutMS=int(opts.server_selection_timeout * 1000),
-            connectTimeoutMS=int(pool_opts.connect_timeout * 1000) if pool_opts.connect_timeout else 20000,
-            username=creds.username if creds else None,
-            password=creds.password if creds else None,
-            authSource=creds.source if creds else None,
-            authMechanism=creds.mechanism if creds else None,
-        )
-
     def _normalize_and_validate_options(
         self, opts: common._CaseInsensitiveDictionary, seeds: set[tuple[str, int | None]]
     ) -> common._CaseInsensitiveDictionary:

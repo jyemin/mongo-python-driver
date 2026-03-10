@@ -21,6 +21,7 @@ UnsupportedOperationError.
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import bson
@@ -31,11 +32,11 @@ from bson.raw_bson import RawBSONDocument
 from pymongo.results import InsertOneResult, InsertManyResult
 from pymongo.native_bindings._client import NativeClient
 from pymongo.native_bindings._callbacks import SyncCallbackBridge
-from pymongo.native_bindings._ffi import ffi
+from pymongo.native_bindings._ffi import ffi, cast_to_int
 
-# Try to import C extension for faster insert_many
+# Try to import C extension for faster BSON encoding/decoding
 try:
-    from pymongo._cnative import _prepare_insert_many
+    from pymongo._cnative import _encode_docs, _decode_batch
     _USE_C_NATIVE = True
 except ImportError:
     _USE_C_NATIVE = False
@@ -124,11 +125,16 @@ def _convert_find(result_ptr, codec_options: CodecOptions):
     exhausted = result_ptr.exhausted
     batch = result_ptr.first_batch
     docs = []
-    if batch.data != ffi.NULL:
-        for i in range(batch.len):
-            ptr = batch.data[i]
-            length = int.from_bytes(ffi.buffer(ptr, 4)[:], "little")
-            docs.append(bson.decode(ffi.buffer(ptr, length)[:], codec_options=codec_options))
+    if batch.data != ffi.NULL and batch.len > 0:
+        if _USE_C_NATIVE:
+            # Pass FFI pointers directly to C extension - no Python loop needed
+            data_ptr = cast_to_int(batch.data)
+            docs = _decode_batch(data_ptr, batch.len, codec_options)
+        else:
+            for i in range(batch.len):
+                ptr = batch.data[i]
+                length = int.from_bytes(ffi.buffer(ptr, 4)[:], "little")
+                docs.append(bson.decode(ffi.buffer(ptr, length)[:], codec_options=codec_options))
     return cursor, exhausted, docs
 
 
@@ -377,18 +383,19 @@ class NativeSyncCollection:
         Returns:
             InsertManyResult with inserted_ids.
         """
-        # Prepare documents: add _ids if not present and encode to BSON
+        # Add _ids if not present (must happen in Python to track inserted_ids)
+        # Modify documents in place like PyMongo does
+        id_list = []
+        for doc in documents:
+            if "_id" not in doc:
+                doc["_id"] = ObjectId()
+            id_list.append(doc["_id"])
+
+        # Encode to BSON - use C extension if available
         if _USE_C_NATIVE:
-            doc_bytes_list, id_list = _prepare_insert_many(documents, self._codec_options)
+            doc_bytes_list = _encode_docs(documents, self._codec_options)
         else:
-            id_list = []
-            doc_bytes_list = []
-            for doc in documents:
-                d = dict(doc)
-                if "_id" not in d:
-                    d["_id"] = ObjectId()
-                id_list.append(d["_id"])
-                doc_bytes_list.append(bson.encode(d, codec_options=self._codec_options))
+            doc_bytes_list = [bson.encode(d, codec_options=self._codec_options) for d in documents]
 
         session_handle = session._handle if session else None
 
@@ -563,7 +570,7 @@ class NativeSyncCursor:
         self._native = native_client
         self._cursor = cursor_handle
         self._exhausted = exhausted
-        self._buffer = list(first_batch)
+        self._buffer = deque(first_batch)  # Use deque for O(1) popleft
         self._codec_options = codec_options
         self._session = session_handle
         self._closed = False
@@ -573,7 +580,7 @@ class NativeSyncCursor:
 
     def __next__(self) -> Dict[str, Any]:
         if self._buffer:
-            return self._buffer.pop(0)
+            return self._buffer.popleft()  # O(1) instead of O(n)
 
         if self._exhausted or self._closed:
             raise StopIteration
@@ -581,7 +588,7 @@ class NativeSyncCursor:
         self._fetch_batch()
 
         if self._buffer:
-            return self._buffer.pop(0)
+            return self._buffer.popleft()
 
         raise StopIteration
 
@@ -590,14 +597,24 @@ class NativeSyncCursor:
         if self._exhausted or self._closed or self._cursor == ffi.NULL:
             return
 
+        codec_opts = self._codec_options
+
         def convert(result):
             exhausted, batch = result
-            docs = []
-            if batch.data != ffi.NULL:
+            if batch.data == ffi.NULL or batch.len == 0:
+                return exhausted, []
+
+            if _USE_C_NATIVE:
+                # Pass FFI pointers directly to C extension - no Python loop needed
+                data_ptr = cast_to_int(batch.data)
+                docs = _decode_batch(data_ptr, batch.len, codec_opts)
+            else:
+                # Fallback: decode each document separately
+                docs = []
                 for i in range(batch.len):
                     ptr = batch.data[i]
                     length = int.from_bytes(ffi.buffer(ptr, 4)[:], "little")
-                    docs.append(bson.decode(ffi.buffer(ptr, length)[:], codec_options=self._codec_options))
+                    docs.append(bson.decode(ffi.buffer(ptr, length)[:], codec_options=codec_opts))
             return exhausted, docs
 
         bridge = SyncCallbackBridge(convert)

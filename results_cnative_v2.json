@@ -1,0 +1,21 @@
+[
+    {
+        "info": {
+            "test_name": "SmallDocBulkInsert",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 64.85434233546154,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    }
+]

@@ -3332,6 +3332,7 @@ _cbson_exec(PyObject *m)
     _cbson_API[_cbson_buffer_write_int32_at_position_INDEX] =
         (void *) buffer_write_int32_at_position;
     _cbson_API[_cbson_downcast_and_check_INDEX] = (void *) _downcast_and_check;
+    _cbson_API[_cbson_elements_to_dict_INDEX] = (void *) elements_to_dict;
 
     c_api_object = PyCapsule_New((void *) _cbson_API, "_cbson._C_API", NULL);
     if (c_api_object == NULL)

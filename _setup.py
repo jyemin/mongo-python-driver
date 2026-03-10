@@ -124,7 +124,10 @@ ext_modules = [
     Extension(
         "pymongo._cnative",
         include_dirs=["bson"],
-        sources=["pymongo/_cnativemodule.c"],
+        sources=[
+            "pymongo/_cnativemodule.c",
+            "bson/buffer.c",
+        ],
     ),
 ]
 

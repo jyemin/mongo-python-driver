@@ -406,3 +406,12 @@ def get_lib():
         _lib = ffi.dlopen(path)
     return _lib
 
+
+# Pre-cache type for efficient pointer casting (avoids pycparser overhead)
+_uintptr_t = ffi.typeof("uintptr_t")
+
+
+def cast_to_int(ptr):
+    """Cast a cffi pointer to an integer efficiently."""
+    return int(ffi.cast(_uintptr_t, ptr))
+
