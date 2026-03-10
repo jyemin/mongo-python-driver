@@ -265,33 +265,29 @@ def _log_callback(level, message, context):
 
 ---
 
-### CHALLENGE-6: TLS/SSL Configuration (HIGH)
+### CHALLENGE-6: TLS/SSL Configuration (MEDIUM)
 
 **Problem**: PyMongo supports:
 - PEM certificate files (`tlsCertificateKeyFile`)
 - CA files (`tlsCAFile`)
 - CRL files (`tlsCRLFile`)
-- `ssl.SSLContext` objects (custom contexts)
 - PyOpenSSL for OCSP support
 
 Native library uses its own TLS stack (rustls or native-tls).
 
 **Supported by Native FFI**:
-- PEM file paths
-- CA file paths
-- Connection string TLS parameters
+- PEM file paths (`tlsCertificateKeyFile`, `tlsCAFile`)
+- Connection string TLS parameters (`tls`, `tlsAllowInvalidCertificates`, etc.)
 
-**NOT Supported**:
-- Custom `ssl.SSLContext` objects
-- PyOpenSSL integration
-- CRL files (need to verify native library support)
+**Needs Verification**:
+- CRL files (`tlsCRLFile`) - need to verify native library support
+- OCSP - native library may handle natively via rustls/webpki
 
 **Solution**:
-- Document limitation: custom SSLContext not supported with native driver
-- Support file-path-based configuration
-- OCSP: Native library handles natively if using rustls with webpki
+- Pass file paths directly to native library
+- Most TLS configuration maps 1:1 to connection string parameters
 
-**Status**: Documented limitation, acceptable for most use cases
+**Status**: Mostly straightforward, verify CRL/OCSP support
 
 ---
 
@@ -324,17 +320,20 @@ def _credential_callback(request, response, context):
 
 **Problem**: PyMongo uses `pymongocrypt` (Python bindings to libmongocrypt).
 
-**Options**:
-1. **Keep Python's pymongocrypt**: Encryption/decryption in Python, only CRUD via native library
-2. **Use native libmongocrypt**: Native library handles encryption end-to-end
+**Why Python's pymongocrypt won't work**: Auto-encryption is deeply integrated into the command execution path:
+1. Driver intercepts command
+2. Consults encryption schema (requires server connection)
+3. Encrypts fields via libmongocrypt
+4. Sends encrypted command
+5. Decrypts response
 
-**Recommendation**: Option 1 for prototype (less integration work), Option 2 for production.
+Since the native library now owns the entire command execution path (connections, retries, wire protocol), Python can't sit "outside" this loop and do encryption separately. The encryption must happen *inside* the native library.
 
-With Option 1:
-- Python encrypts document → sends to native library for insert
-- Native library returns encrypted response → Python decrypts
+**Solution**: Use the native library's built-in libmongocrypt integration. Configuration (key vault, KMS providers, schema maps) passed at client creation time.
 
-**Status**: Defer to Phase 2
+**Explicit Encryption**: `ClientEncryption` for manual encrypt/decrypt operations may still use Python's pymongocrypt since it's not in the CRUD path.
+
+**Status**: Requires native library CSFLE support; defer to Phase 2
 
 ---
 
@@ -471,7 +470,7 @@ def aggregate(self, pipeline: List[dict], **options):
 
 ## Implementation Plan
 
-### Phase 1: Core Infrastructure (Week 1-2)
+### Phase 1: Core Infrastructure
 1. Set up `pymongo/native_bindings/` module structure
 2. cffi build system integration (setup.py/pyproject.toml)
 3. Library loading (`libmongocore.so/.dylib/.dll`)
@@ -479,25 +478,25 @@ def aggregate(self, pipeline: List[dict], **options):
 5. BSON marshalling
 6. Callback bridges (`AsyncCallbackBridge`, `SyncCallbackBridge`)
 
-### Phase 2: Basic CRUD (Week 2-3)
+### Phase 2: Basic CRUD
 1. `NativeClient` (callback-based, sync/async agnostic)
 2. Basic cursor implementation (`NativeCursor`)
 3. Integration with existing `AsyncCollection`/`Collection` using callback bridges
 4. `insert_one`, `find_one`, `update_one`, `delete_one`
 
-### Phase 3: Full CRUD + Sessions (Week 3-4)
+### Phase 3: Full CRUD + Sessions
 1. All CRUD operations
 2. Bulk writes
 3. Sessions and transactions
 4. Aggregation
 
-### Phase 4: Advanced Features (Week 4-5)
+### Phase 4: Advanced Features
 1. Event listeners / monitoring
 2. Change streams
 3. Read/write concerns
 4. Authentication callbacks (OIDC)
 
-### Phase 5: Production Hardening (Week 5-6)
+### Phase 5: Production Hardening
 1. Error handling edge cases
 2. Memory leak testing
 3. Thread safety verification
