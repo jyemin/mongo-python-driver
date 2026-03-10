@@ -12,23 +12,51 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Native bindings to libmongocore via cffi.
+"""Native bindings to libmongodb via cffi.
 
 This module provides Python bindings to the native MongoDB driver core library,
 which handles connection pooling, server selection, wire protocol, command
 execution, retries, batching, sessions, and transactions.
 
-The native bindings are callback-based and sync/async agnostic. The sync/async
-distinction happens at the integration level using callback bridges:
-- AsyncCallbackBridge: wraps callbacks in asyncio.Future
-- SyncCallbackBridge: wraps callbacks in threading.Event
+High-level API:
+- NativeSyncMongoClient: Synchronous MongoDB client
+- NativeAsyncMongoClient: Asynchronous MongoDB client
+
+Low-level API:
+- NativeClient: Callback-based client (sync/async agnostic)
+- AsyncCallbackBridge: Wraps callbacks in asyncio.Future
+- SyncCallbackBridge: Wraps callbacks in threading.Event
 """
 
 from pymongo.native_bindings._loader import is_available, get_library_path
 from pymongo.native_bindings._client import NativeClient
 from pymongo.native_bindings._callbacks import AsyncCallbackBridge, SyncCallbackBridge
+from pymongo.native_bindings.sync_client import (
+    NativeSyncMongoClient,
+    NativeSyncDatabase,
+    NativeSyncCollection,
+    NativeSyncCursor,
+    UnsupportedOperationError,
+)
+from pymongo.native_bindings.async_client import (
+    NativeAsyncMongoClient,
+    NativeAsyncDatabase,
+    NativeAsyncCollection,
+    NativeAsyncCursor,
+)
 
 __all__ = [
+    # High-level API
+    "NativeSyncMongoClient",
+    "NativeSyncDatabase",
+    "NativeSyncCollection",
+    "NativeSyncCursor",
+    "NativeAsyncMongoClient",
+    "NativeAsyncDatabase",
+    "NativeAsyncCollection",
+    "NativeAsyncCursor",
+    "UnsupportedOperationError",
+    # Low-level API
     "is_available",
     "get_library_path",
     "NativeClient",
