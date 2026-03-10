@@ -21,7 +21,6 @@ UnsupportedOperationError.
 
 from __future__ import annotations
 
-from collections import deque
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 import bson

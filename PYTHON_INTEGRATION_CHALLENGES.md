@@ -1,24 +1,24 @@
 # Python Driver Native FFI Integration Challenges
 
-This document outlines the challenges, design decisions, and implementation plan for integrating the native core driver (`libmongocore`) into PyMongo via FFI.
+This document outlines the challenges, design decisions, and implementation details for integrating the native core driver (`libmongodb`) into PyMongo via FFI.
 
 ## Overview
 
-Following the same approach as the Java driver's `native-driver` branch, we will use FFI to delegate CRUD operations and connection management to the native core while keeping Python-specific concerns (codecs, API surface, type hints) in Python.
+Following the same approach as the Java driver's `native-driver` branch, we use FFI to delegate CRUD operations and connection management to the native core while keeping Python-specific concerns (codecs, API surface, type hints) in Python.
 
 ### Key Principle
 **Native core handles**: Connection pooling, server selection, wire protocol, command execution, retries, batching, sessions, transactions
-**Python handles**: BSON codecs, API surface, type hints, monitoring event dispatch, logging integration
+**Python handles**: BSON codecs (encoding/decoding), API surface, type hints, monitoring event dispatch, logging integration
 
 ### FFI Approach: `cffi`
 
-For this prototype, we use `cffi` because:
+We use `cffi` because:
 - Cleaner API than `ctypes`
 - Well-established in Python ecosystem (used by cryptography, PyNaCl, etc.)
 - No compile tooling required at runtime (unlike PyO3)
-- Supports both ABI mode (load .so/.dylib at runtime) and API mode (compile bindings)
+- ABI mode allows loading pre-built native libraries without recompilation
 
-Production may later consider `PyO3` for tighter integration, but `cffi` is ideal for prototyping.
+Production may later consider `PyO3` for tighter integration, but `cffi` works well.
 
 ## Architecture
 
@@ -168,37 +168,38 @@ def insert_one(self, document, ...):
 
 ---
 
-### CHALLENGE-3: BSON Marshalling (MEDIUM)
+### CHALLENGE-3: BSON Marshalling (HIGH - SOLVED)
 
 **Problem**: Need to efficiently pass BSON documents between Python and native library.
 
-**PyMongo BSON Types**:
-- `bson.raw_bson.RawBSONDocument` - already raw bytes, zero-copy possible
-- `dict` - needs encoding via `bson.encode()`
-- Custom document classes via `CodecOptions`
-
 **FFI Boundary**: Raw BSON bytes (`uint8_t*` + `size_t`)
 
-**Solution**:
-```python
-class BsonMarshaller:
-    def __init__(self, codec_options: CodecOptions):
-        self.codec_options = codec_options
+**Critical Performance Insight**: BSON encoding/decoding must use PyMongo's C extensions (`_cbson`) to match pure-PyMongo performance. Using Python-level `bson.encode()`/`bson.decode()` in a loop is too slow.
 
-    def to_bytes(self, doc: Any) -> bytes:
-        if isinstance(doc, RawBSONDocument):
-            return bytes(doc.raw)
-        return bson.encode(doc, codec_options=self.codec_options)
+**Solution - C Extension `pymongo/_cnativemodule.c`**:
 
-    def from_bytes(self, data: bytes) -> Any:
-        if self.codec_options.document_class is RawBSONDocument:
-            return RawBSONDocument(data)
-        return bson.decode(data, codec_options=self.codec_options)
-```
+For **encoding** (insert_many), we created `_encode_docs()` that:
+- Takes a list of documents with `_id`s already added
+- Calls `write_dict()` directly from the `_cbson` C API for each document
+- Returns a list of BSON bytes
+- Avoids Python function call overhead per document
 
-**Optimization**: For `RawBSONDocument`, we can pass pointer directly without copy.
+For **decoding** (find/cursor), we created `_decode_batch()` that:
+- Takes a pointer to the FFI's array of BSON document pointers and count
+- Calls `elements_to_dict()` from the `_cbson` C API for each document
+- Returns a list of decoded Python dicts
+- Avoids Python loop and function call overhead
 
-**Status**: Straightforward, implementation pending
+**Extended `_cbson` C API**: Added `elements_to_dict` to the C API capsule so `_cnative` can call it directly.
+
+**Performance Results**:
+- Small doc bulk insert: 60.5 → 114 MB/s (+88%)
+- Find many cursor: 157 → 225 MB/s (+43%)
+- Now matches pure-PyMongo performance
+
+**Key Lesson**: The bottleneck was not the FFI itself, but the per-document Python overhead. Moving encoding/decoding loops into C eliminated this.
+
+**Status**: Complete ✓
 
 ---
 
@@ -369,47 +370,58 @@ class NativeClientSession:
 
 ---
 
-### CHALLENGE-10: Cursor Lifecycle (MEDIUM)
+### CHALLENGE-10: Cursor Lifecycle (MEDIUM - SOLVED)
 
 **Problem**: Cursors need to be properly closed, support iteration, getMore, etc.
 
-**PyMongo Pattern**:
+**Implementation**:
 ```python
-cursor = collection.find({"x": 1})
-for doc in cursor:
-    print(doc)
-# or
-cursor.close()
-```
-
-**FFI Pattern**:
-```python
-class NativeCursor:
-    def __init__(self, cursor_handle: ffi.CData, marshaller: BsonMarshaller):
-        self._handle = cursor_handle
-        self._marshaller = marshaller
-        self._buffer: deque = deque()
+class NativeSyncCursor:
+    def __init__(self, native_client, cursor_handle, exhausted, first_batch, codec_options, session_handle=None):
+        self._native = native_client
+        self._cursor = cursor_handle
+        self._exhausted = exhausted
+        self._buffer = deque(first_batch)  # Use deque for O(1) popleft
+        self._codec_options = codec_options
+        self._session = session_handle
+        self._closed = False
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        if not self._buffer:
-            self._fetch_batch()
-        if not self._buffer:
+        if self._buffer:
+            return self._buffer.popleft()  # O(1) vs list.pop(0) which is O(n)
+        if self._exhausted or self._closed:
             raise StopIteration
-        return self._buffer.popleft()
+        self._fetch_batch()
+        if self._buffer:
+            return self._buffer.popleft()
+        raise StopIteration
 
     def _fetch_batch(self):
-        result = lib.mongo_cursor_get_more(self._handle)
-        for doc_bytes in iterate_batch(result):
-            self._buffer.append(self._marshaller.from_bytes(doc_bytes))
+        # Use C extension for batch decoding - pass FFI pointers directly
+        def convert(result):
+            exhausted, batch = result
+            if batch.data == ffi.NULL or batch.len == 0:
+                return exhausted, []
+            data_ptr = cast_to_int(batch.data)  # Cached type for efficiency
+            docs = _decode_batch(data_ptr, batch.len, self._codec_options)
+            return exhausted, docs
 
-    def close(self):
-        lib.mongo_cursor_close(self._handle)
+        bridge = SyncCallbackBridge(convert)
+        self._native.cursor_get_more(self._cursor, callback, bridge.handle, session=self._session)
+        self._exhausted, new_docs = bridge.wait()
+        self._buffer.extend(new_docs)
 ```
 
-**Status**: Design complete
+**Key Optimizations**:
+1. Use `deque` instead of `list` for O(1) popleft
+2. Use `_decode_batch` C extension to decode all docs in batch without Python loop
+3. Cache `uintptr_t` type to avoid pycparser overhead on each pointer cast
+4. Import `deque` at module level, not per-cursor
+
+**Status**: Complete ✓
 
 ---
 
@@ -507,22 +519,53 @@ def aggregate(self, pipeline: List[dict], **options):
 
 ```
 pymongo/
+├── _cnativemodule.c           # C extension for batch BSON encoding/decoding
 ├── native_bindings/
-│   ├── __init__.py
-│   ├── _build.py              # cffi build script
-│   ├── _ffi.py                # cffi definitions (from libmongodb.h)
-│   ├── _loader.py             # Library loading logic
-│   ├── _errors.py             # Error conversion
-│   ├── _marshalling.py        # BSON and options marshalling
-│   ├── _callbacks.py          # AsyncCallbackBridge, SyncCallbackBridge
-│   ├── _client.py             # NativeClient (callback-based, sync/async agnostic)
-│   ├── _cursor.py             # NativeCursor (callback-based)
-│   └── _session.py            # NativeSession (callback-based)
+│   ├── __init__.py            # Exports NativeSyncMongoClient
+│   ├── _ffi.py                # cffi definitions (from libmongodb.h), cast_to_int helper
+│   ├── _loader.py             # Library loading logic (LIBMONGODB_PATH env var)
+│   ├── _callbacks.py          # SyncCallbackBridge (threading.Event based)
+│   ├── _client.py             # NativeClient (low-level FFI wrapper)
+│   └── sync_client.py         # NativeSyncMongoClient, NativeSyncDatabase,
+│                              # NativeSyncCollection, NativeSyncCursor
+bson/
+├── _cbsonmodule.c             # Extended C API with elements_to_dict
+├── _cbsonmodule.h             # C API capsule definitions
 ```
 
-Note: No `asynchronous/` and `synchronous/` subdirectories needed - the native bindings
-are callback-based and sync/async agnostic. The sync/async distinction happens at the
-integration level in `AsyncCollection`/`Collection` using the appropriate callback bridge.
+**Integration Pattern**: `MongoClient` creates a `NativeSyncMongoClient` and delegates
+CRUD operations to it. The native bindings use `SyncCallbackBridge` to convert
+callback-based FFI to blocking Python calls.
+
+## Performance Results
+
+Benchmarks run with PyMongo's driver benchmark suite (7 tests matching Java driver-benchmarks):
+
+```
+Benchmark              PyMongo   Native    Rust     vs PyMongo
+---------------------  --------  -------   ------   ----------
+Run command               0.17     0.17     0.20        0% ≈
+Find one                 13.59    13.45    20.18       -1% ≈
+Small doc insertOne       2.63     2.69     4.02       +2% ≈
+Large doc insertOne        375      390      569       +4% ≈
+Find many (cursor)         224      225      229        0% ≈
+Small doc bulk insert      113      114      175        0% ≈
+Large doc bulk insert      341      344      520        0% ≈
+```
+
+**Key performance learnings**:
+
+1. **C extensions are essential**: Initial implementation without C extensions showed 47% slower bulk insert and 30% slower cursor iteration. The per-document Python function call overhead was the bottleneck, not FFI.
+
+2. **Use existing C infrastructure**: PyMongo's `_cbson` already has optimized `write_dict` and `elements_to_dict` functions. Extending the C API to expose these was more effective than reimplementing.
+
+3. **Avoid Python loops for batches**: Pass FFI pointer arrays directly to C extensions rather than iterating in Python.
+
+4. **Data structure choice matters**: Using `deque` instead of `list` for cursor buffer (O(1) popleft vs O(n) pop(0)). PyMongo does the same - the one-time copy from list to deque per batch is acceptable.
+
+5. **Cache cffi types**: `ffi.cast("uintptr_t", ptr)` parses the type string each time. Caching with `ffi.typeof()` avoids pycparser overhead.
+
+6. **Batch sizes**: MongoDB's default initial batch size is 101 documents. Ensure subsequent batches are appropriately sized for throughput.
 
 ## Open Questions
 
