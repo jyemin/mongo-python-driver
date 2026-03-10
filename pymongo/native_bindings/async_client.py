@@ -47,7 +47,7 @@ from pymongo.native_bindings.sync_client import (
 
 # Import C extension if available
 if _USE_C_NATIVE:
-    from pymongo._cnative import _encode_docs_contiguous, _decode_batch
+    from pymongo._cnative import _encode_docs, _decode_batch
 
 
 class NativeAsyncMongoClient:
@@ -182,24 +182,14 @@ class NativeAsyncCollection:
 
         # Encode to BSON
         if _USE_C_NATIVE:
-            # Contiguous buffer + pointer list
-            buffer, pointer_list = _encode_docs_contiguous(documents, self._codec_options)
+            doc_bytes_list = _encode_docs(documents, self._codec_options)
         else:
-            # Fallback: encode each doc separately
             doc_bytes_list = [bson.encode(d, codec_options=self._codec_options) for d in documents]
-            buffer = b''.join(doc_bytes_list)
-            import ctypes
-            pointer_list = []
-            offset = 0
-            for doc_bytes in doc_bytes_list:
-                ptr = ctypes.cast(ctypes.c_char_p(buffer), ctypes.c_void_p).value + offset
-                pointer_list.append(ptr)
-                offset += len(doc_bytes)
 
         session_handle = session._handle if session else None
         bridge = AsyncCallbackBridge(lambda r: None)  # We already have the IDs
         self._database._client._native.insert_many(
-            self._database.name, self._name, buffer, pointer_list, _insert_many_cb, bridge.handle, bridge._refs,
+            self._database.name, self._name, doc_bytes_list, _insert_many_cb, bridge.handle, bridge._refs,
             ordered=ordered, bypass_document_validation=bypass_document_validation, session=session_handle,
         )
         await bridge.future

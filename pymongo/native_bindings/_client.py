@@ -347,8 +347,7 @@ class NativeClient:
         self,
         db_name: str,
         coll_name: str,
-        buffer: bytes,
-        pointer_list: list,
+        documents: list,
         callback: Callable,
         userdata: Any,
         keepalive: list,
@@ -362,8 +361,7 @@ class NativeClient:
         Args:
             db_name: Database name.
             coll_name: Collection name.
-            buffer: Contiguous buffer containing all BSON documents.
-            pointer_list: List of integer pointers into the buffer, one per document.
+            documents: List of BSON-encoded document bytes.
             callback: FFI callback function.
             userdata: FFI handle to pass to callback.
             keepalive: List to append FFI objects that must stay alive until callback.
@@ -371,13 +369,14 @@ class NativeClient:
             ordered: If True, stop on first error.
             session: Optional client session handle.
         """
-        # Build array of document pointers from the pointer list
-        ptr_array = ffi.new("uint8_t*[]", [ffi.cast("uint8_t*", p) for p in pointer_list])
+        # Build array of document pointers
+        buffers = [ffi.from_buffer(doc) for doc in documents]
+        ptr_array = ffi.new("uint8_t*[]", buffers)
 
         # BsonArray is passed by value, so create the struct directly
         docs_struct = ffi.new("BsonArray *")
         docs_struct.data = ptr_array
-        docs_struct.len = len(pointer_list)
+        docs_struct.len = len(documents)
 
         ctx = ffi.new("OperationContext *")
         ctx.session = session if session else ffi.NULL
@@ -391,8 +390,8 @@ class NativeClient:
         db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
         coll_bytes = ffi.new("char[]", coll_name.encode("utf-8"))
 
-        # Keep FFI objects alive - buffer must stay alive until callback completes
-        keepalive.extend([buffer, ptr_array, docs_struct, ctx, db_bytes, coll_bytes])
+        # Keep FFI objects alive until callback completes
+        keepalive.extend([documents, buffers, ptr_array, docs_struct, ctx, db_bytes, coll_bytes])
 
         self._lib.mongo_insert_many(
             self._client,
