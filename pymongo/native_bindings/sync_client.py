@@ -569,7 +569,8 @@ class NativeSyncCursor:
         self._native = native_client
         self._cursor = cursor_handle
         self._exhausted = exhausted
-        self._buffer = deque(first_batch)  # Use deque for O(1) popleft
+        self._buffer = first_batch  # Use list directly, no copy
+        self._index = 0
         self._codec_options = codec_options
         self._session = session_handle
         self._closed = False
@@ -578,16 +579,22 @@ class NativeSyncCursor:
         return self
 
     def __next__(self) -> Dict[str, Any]:
-        if self._buffer:
-            return self._buffer.popleft()  # O(1) instead of O(n)
+        if self._index < len(self._buffer):
+            doc = self._buffer[self._index]
+            self._buffer[self._index] = None  # Allow GC
+            self._index += 1
+            return doc
 
         if self._exhausted or self._closed:
             raise StopIteration
 
         self._fetch_batch()
 
-        if self._buffer:
-            return self._buffer.popleft()
+        if self._index < len(self._buffer):
+            doc = self._buffer[self._index]
+            self._buffer[self._index] = None  # Allow GC
+            self._index += 1
+            return doc
 
         raise StopIteration
 
@@ -619,7 +626,9 @@ class NativeSyncCursor:
         bridge = SyncCallbackBridge(convert)
         self._native.cursor_get_more(self._cursor, _get_more_cb, bridge.handle, session=self._session)
         self._exhausted, new_docs = bridge.wait()
-        self._buffer.extend(new_docs)
+        # Replace buffer with new batch
+        self._buffer = new_docs
+        self._index = 0
 
     def close(self) -> None:
         """Close the cursor."""
