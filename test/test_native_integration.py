@@ -270,6 +270,113 @@ class TestPyMongoNativeTransactions(unittest.TestCase):
         self.assertEqual(docs[0]["name"], "Initial")
 
 
+class TestAsyncPyMongoNativeIntegration(unittest.TestCase):
+    """Tests for async PyMongo API with native FFI backend."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not is_available():
+            raise unittest.SkipTest("Native library not available")
+        import asyncio
+        from pymongo import AsyncMongoClient
+        cls.AsyncMongoClient = AsyncMongoClient
+        cls.asyncio = asyncio
+
+    def _run(self, coro):
+        """Helper to run async code in sync tests."""
+        return self.asyncio.get_event_loop().run_until_complete(coro)
+
+    def test_native_client_initialized(self):
+        """Verify AsyncMongoClient has native client."""
+        async def run():
+            async with self.AsyncMongoClient("localhost", 27017) as client:
+                self.assertIsNotNone(client._native_client)
+        self._run(run())
+
+    def test_insert_one(self):
+        """Test insert_one via async PyMongo API."""
+        async def run():
+            async with self.AsyncMongoClient("localhost", 27017) as client:
+                coll = client["test_async_integration"]["test_coll"]
+                await coll.drop()
+
+                result = await coll.insert_one({"x": 1, "y": 2})
+                self.assertIsInstance(result.inserted_id, ObjectId)
+
+                doc = await coll.find_one({"x": 1})
+                self.assertIsNotNone(doc)
+                self.assertEqual(doc["y"], 2)
+
+                await coll.drop()
+        self._run(run())
+
+    def test_insert_many(self):
+        """Test insert_many via async PyMongo API."""
+        async def run():
+            async with self.AsyncMongoClient("localhost", 27017) as client:
+                coll = client["test_async_integration"]["test_coll"]
+                await coll.drop()
+
+                result = await coll.insert_many([{"x": i} for i in range(5)])
+                self.assertEqual(len(result.inserted_ids), 5)
+
+                count = 0
+                async for doc in coll.find():
+                    count += 1
+                self.assertEqual(count, 5)
+
+                await coll.drop()
+        self._run(run())
+
+    def test_find_one(self):
+        """Test find_one via async PyMongo API."""
+        async def run():
+            async with self.AsyncMongoClient("localhost", 27017) as client:
+                coll = client["test_async_integration"]["test_coll"]
+                await coll.drop()
+
+                await coll.insert_one({"name": "Alice", "age": 30})
+                doc = await coll.find_one({"name": "Alice"})
+                self.assertIsNotNone(doc)
+                self.assertEqual(doc["name"], "Alice")
+
+                await coll.drop()
+        self._run(run())
+
+    def test_find_cursor_iteration(self):
+        """Test cursor iteration with multiple batches."""
+        async def run():
+            async with self.AsyncMongoClient("localhost", 27017) as client:
+                coll = client["test_async_integration"]["test_coll"]
+                await coll.drop()
+
+                await coll.insert_many([{"i": i} for i in range(250)])
+
+                count = 0
+                async for doc in coll.find(batch_size=10):
+                    count += 1
+                self.assertEqual(count, 250)
+
+                await coll.drop()
+        self._run(run())
+
+    def test_unsupported_operations(self):
+        """Test unsupported operations raise errors."""
+        async def run():
+            async with self.AsyncMongoClient("localhost", 27017) as client:
+                coll = client["test_async_integration"]["test_coll"]
+
+                with self.assertRaises(UnsupportedOperationError):
+                    await coll.update_one({}, {"$set": {"x": 1}})
+
+                with self.assertRaises(UnsupportedOperationError):
+                    await coll.delete_one({})
+
+                with self.assertRaises(UnsupportedOperationError):
+                    await coll.aggregate([])
+        self._run(run())
+
+
 if __name__ == "__main__":
     unittest.main()
 

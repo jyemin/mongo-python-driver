@@ -883,22 +883,17 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_is_document_type("document", document)
-        if not (isinstance(document, RawBSONDocument) or "_id" in document):
-            document["_id"] = ObjectId()  # type: ignore[index]
+        # Delegate to native FFI implementation
+        native_client = self._database.client._native_client
+        if native_client is None:
+            raise RuntimeError("Native client not available")
 
-        write_concern = self._write_concern_for(session)
-        return InsertOneResult(
-            await self._insert_one(
-                document,
-                ordered=True,
-                write_concern=write_concern,
-                op_id=None,
-                bypass_doc_val=bypass_document_validation,
-                session=session,
-                comment=comment,
-            ),
-            write_concern.acknowledged,
+        native_coll = native_client[self._database.name][self._name]
+        native_session = None  # TODO: map session to native session
+        return await native_coll.insert_one(
+            document,
+            bypass_document_validation=bypass_document_validation or False,
+            session=native_session,
         )
 
     @_csot.apply
@@ -952,29 +947,19 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        if (
-            not isinstance(documents, abc.Iterable)
-            or isinstance(documents, abc.Mapping)
-            or not documents
-        ):
-            raise TypeError("documents must be a non-empty list")
-        inserted_ids: list[ObjectId] = []
+        # Delegate to native FFI implementation
+        native_client = self._database.client._native_client
+        if native_client is None:
+            raise RuntimeError("Native client not available")
 
-        def gen() -> Iterator[tuple[int, Mapping[str, Any]]]:
-            """A generator that validates documents and handles _ids."""
-            for document in documents:
-                common.validate_is_document_type("document", document)
-                if not isinstance(document, RawBSONDocument):
-                    if "_id" not in document:
-                        document["_id"] = ObjectId()  # type: ignore[index]
-                    inserted_ids.append(document["_id"])
-                yield (message._INSERT, document)
-
-        write_concern = self._write_concern_for(session)
-        blk = _AsyncBulk(self, ordered, bypass_document_validation, comment=comment)
-        blk.ops = list(gen())
-        await blk.execute(write_concern, session, _Op.INSERT)
-        return InsertManyResult(inserted_ids, write_concern.acknowledged)
+        native_coll = native_client[self._database.name][self._name]
+        native_session = None
+        return await native_coll.insert_many(
+            list(documents),
+            ordered=ordered,
+            bypass_document_validation=bypass_document_validation or False,
+            session=native_session,
+        )
 
     async def _update(
         self,
@@ -1328,29 +1313,8 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_is_mapping("filter", filter)
-        common.validate_ok_for_update(update)
-        common.validate_list_or_none("array_filters", array_filters)
-
-        write_concern = self._write_concern_for(session)
-        return UpdateResult(
-            await self._update_retryable(
-                filter,
-                update,
-                _Op.UPDATE,
-                upsert,
-                write_concern=write_concern,
-                bypass_doc_val=bypass_document_validation,
-                collation=collation,
-                array_filters=array_filters,
-                hint=hint,
-                session=session,
-                let=let,
-                sort=sort,
-                comment=comment,
-            ),
-            write_concern.acknowledged,
-        )
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("update_one not yet supported in native FFI")
 
     async def update_many(
         self,
@@ -1429,29 +1393,8 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_is_mapping("filter", filter)
-        common.validate_ok_for_update(update)
-        common.validate_list_or_none("array_filters", array_filters)
-
-        write_concern = self._write_concern_for(session)
-        return UpdateResult(
-            await self._update_retryable(
-                filter,
-                update,
-                _Op.UPDATE,
-                upsert,
-                multi=True,
-                write_concern=write_concern,
-                bypass_doc_val=bypass_document_validation,
-                collation=collation,
-                array_filters=array_filters,
-                hint=hint,
-                session=session,
-                let=let,
-                comment=comment,
-            ),
-            write_concern.acknowledged,
-        )
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("update_many not yet supported in native FFI")
 
     async def drop(
         self,
@@ -1485,16 +1428,13 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
         .. versionchanged:: 3.6
            Added ``session`` parameter.
         """
-        dbo = self._database.client.get_database(
-            self._database.name,
-            self.codec_options,
-            self.read_preference,
-            self.write_concern,
-            self.read_concern,
-        )
-        await dbo.drop_collection(
-            self._name, session=session, comment=comment, encrypted_fields=encrypted_fields
-        )
+        # Delegate to native FFI implementation
+        native_client = self._database.client._native_client
+        if native_client is None:
+            raise RuntimeError("Native client not available")
+
+        native_coll = native_client[self._database.name][self._name]
+        await native_coll.drop(session=None)  # TODO: map session
 
     async def _delete(
         self,
@@ -1642,20 +1582,8 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
           Added the `collation` option.
         .. versionadded:: 3.0
         """
-        write_concern = self._write_concern_for(session)
-        return DeleteResult(
-            await self._delete_retryable(
-                filter,
-                False,
-                write_concern=write_concern,
-                collation=collation,
-                hint=hint,
-                session=session,
-                let=let,
-                comment=comment,
-            ),
-            write_concern.acknowledged,
-        )
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("delete_one not yet supported in native FFI")
 
     async def delete_many(
         self,
@@ -1707,20 +1635,8 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
           Added the `collation` option.
         .. versionadded:: 3.0
         """
-        write_concern = self._write_concern_for(session)
-        return DeleteResult(
-            await self._delete_retryable(
-                filter,
-                True,
-                write_concern=write_concern,
-                collation=collation,
-                hint=hint,
-                session=session,
-                let=let,
-                comment=comment,
-            ),
-            write_concern.acknowledged,
-        )
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("delete_many not yet supported in native FFI")
 
     async def find_one(
         self, filter: Optional[Any] = None, *args: Any, **kwargs: Any
@@ -1750,12 +1666,15 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
               >>> await collection.find_one(max_time_ms=100)
 
         """
+        # Delegate to native FFI implementation
+        native_client = self._database.client._native_client
+        if native_client is None:
+            raise RuntimeError("Native client not available")
+
+        native_coll = native_client[self._database.name][self._name]
         if filter is not None and not isinstance(filter, abc.Mapping):
             filter = {"_id": filter}
-        cursor = self.find(filter, *args, **kwargs)
-        async for result in cursor.limit(-1):
-            return result
-        return None
+        return await native_coll.find_one(filter, session=None)
 
     def find(self, *args: Any, **kwargs: Any) -> AsyncCursor[_DocumentType]:
         """Query the database.
@@ -1952,7 +1871,29 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
 
         .. seealso:: The MongoDB documentation on `find <https://dochub.mongodb.org/core/find>`_.
         """
-        return AsyncCursor(self, *args, **kwargs)
+        # Delegate to native FFI implementation
+        native_client = self._database.client._native_client
+        if native_client is None:
+            raise RuntimeError("Native client not available")
+
+        native_coll = native_client[self._database.name][self._name]
+        # Extract supported kwargs, ignore unsupported ones
+        filter = kwargs.get('filter') or (args[0] if args else None)
+        projection = kwargs.get('projection') or (args[1] if len(args) > 1 else None)
+        skip = kwargs.get('skip', 0)
+        limit = kwargs.get('limit', 0)
+        sort = kwargs.get('sort')
+        batch_size = kwargs.get('batch_size', -1)
+
+        return native_coll.find(
+            filter=filter,
+            projection=projection,
+            skip=skip,
+            limit=limit,
+            sort=sort,
+            batch_size=batch_size,
+            session=None,  # TODO: map session
+        )
 
     def find_raw_batches(self, *args: Any, **kwargs: Any) -> AsyncRawBatchCursor[_DocumentType]:
         """Query the database and retrieve batches of raw BSON.
@@ -3013,16 +2954,8 @@ class AsyncCollection(common.BaseObject, Generic[_DocumentType]):
         .. _aggregate command:
             https://mongodb.com/docs/manual/reference/command/aggregate
         """
-        async with self._database.client._tmp_session(session) as s:
-            return await self._aggregate(
-                _CollectionAggregationCommand,
-                pipeline,
-                AsyncCommandCursor,
-                session=s,
-                let=let,
-                comment=comment,
-                **kwargs,
-            )
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("aggregate not yet supported in native FFI")
 
     async def aggregate_raw_batches(
         self,
