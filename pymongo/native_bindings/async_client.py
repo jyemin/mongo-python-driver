@@ -43,6 +43,7 @@ from pymongo.native_bindings.sync_client import (
     _convert_find,
     _convert_command,
     _USE_C_NATIVE,
+    _build_native_client_kwargs,
 )
 
 # Import C extension if available
@@ -59,20 +60,8 @@ class NativeAsyncMongoClient:
             hosts = host
         else:
             hosts = f"{host}:{port}"
-        self._native = NativeClient(
-            hosts,
-            app_name=kwargs.get("appName") or kwargs.get("appname"),
-            direct_connection=kwargs.get("directConnection", False),
-            server_selection_timeout_ms=kwargs.get("serverSelectionTimeoutMS", 30000),
-            connect_timeout_ms=kwargs.get("connectTimeoutMS", 20000),
-            username=kwargs.get("username"),
-            password=kwargs.get("password"),
-            auth_source=kwargs.get("authSource"),
-            auth_mechanism=kwargs.get("authMechanism"),
-            tls=kwargs.get("tls", False),
-            tls_ca_file=kwargs.get("tlsCAFile"),
-            tls_certificate_key_file=kwargs.get("tlsCertificateKeyFile"),
-        )
+
+        self._native = NativeClient(hosts, **_build_native_client_kwargs(kwargs))
         self._codec_options = kwargs.get("codec_options", DEFAULT_CODEC_OPTIONS)
     
     def close(self) -> None:

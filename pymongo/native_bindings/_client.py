@@ -42,14 +42,23 @@ class NativeClient:
         self,
         hosts: str,
         *,
+        # Connection settings
         app_name: Optional[str] = None,
+        compressors: Optional[str] = None,  # Comma-separated: "zstd,snappy,zlib"
         direct_connection: bool = False,
         load_balanced: bool = False,
         max_pool_size: int = -1,
         min_pool_size: int = -1,
+        max_idle_time_ms: int = -1,
         connect_timeout_ms: int = -1,
+        socket_timeout_ms: int = -1,
         server_selection_timeout_ms: int = -1,
+        local_threshold_ms: int = -1,
+        heartbeat_frequency_ms: int = -1,
         replica_set: Optional[str] = None,
+        read_preference_mode: int = 0,  # 0 = primary
+        srv_service_name: Optional[str] = None,
+        srv_max_hosts: int = -1,
         # Auth settings
         username: Optional[str] = None,
         password: Optional[str] = None,
@@ -60,6 +69,7 @@ class NativeClient:
         tls_allow_invalid_certificates: bool = False,
         tls_allow_invalid_hostnames: bool = False,
         tls_ca_file: Optional[str] = None,
+        tls_cert_file: Optional[str] = None,
         tls_certificate_key_file: Optional[str] = None,
     ):
         """Create a new native client.
@@ -91,21 +101,21 @@ class NativeClient:
         conn = ffi.new("ConnectionSettings *")
         conn.hosts = keep_cstr(hosts)
         conn.app_name = keep_cstr(app_name)
-        conn.compressors = ffi.NULL
+        conn.compressors = keep_cstr(compressors)
         conn.direct_connection = direct_connection
         conn.load_balanced = load_balanced
         conn.max_pool_size = max_pool_size
         conn.min_pool_size = min_pool_size
-        conn.max_idle_time_ms = -1
+        conn.max_idle_time_ms = max_idle_time_ms
         conn.connect_timeout_ms = connect_timeout_ms
-        conn.socket_timeout_ms = -1
+        conn.socket_timeout_ms = socket_timeout_ms
         conn.server_selection_timeout_ms = server_selection_timeout_ms
-        conn.local_threshold_ms = -1
-        conn.heartbeat_frequency_ms = -1
+        conn.local_threshold_ms = local_threshold_ms
+        conn.heartbeat_frequency_ms = heartbeat_frequency_ms
         conn.replica_set = keep_cstr(replica_set)
-        conn.read_preference_mode = 0  # Primary
-        conn.srv_service_name = ffi.NULL
-        conn.srv_max_hosts = -1
+        conn.read_preference_mode = read_preference_mode
+        conn.srv_service_name = keep_cstr(srv_service_name)
+        conn.srv_max_hosts = srv_max_hosts
 
         # Build auth settings
         auth = ffi.NULL
@@ -118,13 +128,13 @@ class NativeClient:
 
         # Build TLS settings
         tls_settings = ffi.NULL
-        if tls or tls_ca_file or tls_certificate_key_file:
+        if tls or tls_ca_file or tls_cert_file or tls_certificate_key_file:
             tls_settings = ffi.new("TlsSettings *")
-            tls_settings.enabled = tls or bool(tls_ca_file) or bool(tls_certificate_key_file)
+            tls_settings.enabled = tls or bool(tls_ca_file) or bool(tls_cert_file) or bool(tls_certificate_key_file)
             tls_settings.allow_invalid_certificates = tls_allow_invalid_certificates
             tls_settings.allow_invalid_hostnames = tls_allow_invalid_hostnames
             tls_settings.ca_file = keep_cstr(tls_ca_file)
-            tls_settings.cert_file = ffi.NULL
+            tls_settings.cert_file = keep_cstr(tls_cert_file)
             tls_settings.cert_key_file = keep_cstr(tls_certificate_key_file)
         
         # Create the client

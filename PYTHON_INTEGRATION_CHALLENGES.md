@@ -73,7 +73,7 @@ This means **no synchro.py changes are needed** for the native bindings module i
 
 ## Integration Challenges
 
-### CHALLENGE-1: Sync/Async Integration (LOW - SOLVED)
+### CHALLENGE-1: Sync/Async Integration (Implemented)
 
 **Problem**: PyMongo uses `unasync` to generate synchronous code from async code. How does the native FFI layer work with both?
 
@@ -90,453 +90,133 @@ The sync/async distinction happens at the **integration level** in `AsyncCollect
 
 **No changes to synchro.py are needed** for the native bindings module.
 
-**Status**: Design complete ✓
-
 ---
 
-### CHALLENGE-2: Callback Bridges (HIGH)
+### CHALLENGE-2: Callback Bridges (Implemented)
 
 **Problem**: Native FFI uses callback-based async (function pointer called when operation completes). Need to bridge to Python's async/await and blocking patterns.
 
-**Native FFI Pattern**:
-```c
-void mongo_insert_one(
-    MongoClient* client,
-    const char* db,
-    const char* coll,
-    const uint8_t* doc_bytes,
-    size_t doc_len,
-    void (*callback)(void* context, MongoResult* result),
-    void* context
-);
-```
-
-**Solution - Two callback bridges**:
-```python
-# Async bridge - wraps callback in Future
-class AsyncCallbackBridge:
-    def __init__(self):
-        self.loop = asyncio.get_event_loop()
-        self.future: asyncio.Future = self.loop.create_future()
-
-    def on_complete(self, result):
-        if result.error:
-            self.loop.call_soon_threadsafe(
-                self.future.set_exception, convert_error(result.error))
-        else:
-            self.loop.call_soon_threadsafe(
-                self.future.set_result, convert_result(result))
-
-# Sync bridge - wraps callback in Event
-class SyncCallbackBridge:
-    def __init__(self):
-        self.event = threading.Event()
-        self.result = None
-        self.error = None
-
-    def on_complete(self, result):
-        if result.error:
-            self.error = convert_error(result.error)
-        else:
-            self.result = convert_result(result)
-        self.event.set()
-
-    def wait(self):
-        self.event.wait()
-        if self.error:
-            raise self.error
-        return self.result
-```
-
-**Usage in AsyncCollection**:
-```python
-async def insert_one(self, document, ...):
-    bridge = AsyncCallbackBridge()
-    self._native_client.insert_one(db, coll, doc_bytes, bridge.on_complete)
-    return await bridge.future
-```
-
-**Usage in Collection**:
-```python
-def insert_one(self, document, ...):
-    bridge = SyncCallbackBridge()
-    self._native_client.insert_one(db, coll, doc_bytes, bridge.on_complete)
-    return bridge.wait()
-```
-
-**Status**: Design complete
+**Solution**: `SyncCallbackBridge` uses `threading.Event`, `AsyncCallbackBridge` uses `asyncio.Future` with `call_soon_threadsafe`.
 
 ---
 
-### CHALLENGE-3: BSON Marshalling (HIGH - SOLVED)
+### CHALLENGE-3: BSON Marshalling (Implemented)
 
 **Problem**: Efficiently pass BSON documents between Python and native library.
 
-**FFI Boundary**: Raw BSON bytes (`uint8_t*` + `size_t`)
+**Solution**: C extension `pymongo/_cnativemodule.c` with:
+- `_encode_docs_contiguous()`: Encodes docs to single buffer, returns buffer + pointer list
+- `_decode_batch()`: Decodes from FFI pointer array using `_cbson` C API
 
-**Solution - C Extension `pymongo/_cnativemodule.c`**:
-
-For **encoding** (insert_many), `_encode_docs()`:
-- Takes a list of documents with `_id`s already added
-- Calls `write_dict()` directly from the `_cbson` C API for each document
-- Returns a list of BSON bytes
-
-For **decoding** (find/cursor), `_decode_batch()`:
-- Takes a pointer to the FFI's array of BSON document pointers and count
-- Calls `elements_to_dict()` from the `_cbson` C API for each document
-- Returns a list of decoded Python dicts
-
-**Extended `_cbson` C API**: Added `elements_to_dict` to the C API capsule so `_cnative` can call it directly.
-
-**Status**: Complete
+Extended `_cbson` C API to expose `elements_to_dict`.
 
 ---
 
-### CHALLENGE-4: Event Listeners / Monitoring (HIGH)
+### CHALLENGE-4: Event Listeners / Monitoring
 
-**Problem**: PyMongo has extensive monitoring via `pymongo.monitoring`:
-- `CommandListener` - command started/succeeded/failed
-- `ServerListener` - server opened/closed/description changed
-- `TopologyListener` - topology changes
-- `ConnectionPoolListener` - pool events
-- `ServerHeartbeatListener` - heartbeat events
+**Problem**: PyMongo has monitoring via `pymongo.monitoring` (CommandListener, ServerListener, etc).
 
-**Current Pattern**: Events registered globally via `monitoring.register()` or per-client.
+**Solution**: Register Python callbacks with native library at client creation. Native library calls back with event data.
 
-**FFI Requirement**: Native library needs to call back into Python when events occur.
-
-**Solution** (similar to Java):
-1. Register Python callbacks with native library at client creation
-2. Native library calls `mongo_event_callback(event_type, event_data_bson)`
-3. Python deserializes and dispatches to registered listeners
-
-```python
-@ffi.callback("void(int, const uint8_t*, size_t, void*)")
-def _event_callback(event_type, data_ptr, data_len, context):
-    client = ffi.from_handle(context)
-    event_data = ffi.buffer(data_ptr, data_len)[:]
-    event = deserialize_event(event_type, event_data)
-    client._dispatch_event(event)
-```
-
-**Complexity**: Need to map native event types to PyMongo event classes.
-
-**Status**: HIGH priority, requires native library support
+**Status**: Not implemented. Requires native library callback support.
 
 ---
 
-### CHALLENGE-5: Logging Integration (HIGH)
+### CHALLENGE-5: Logging Integration
 
-**Problem**: PyMongo uses Python's `logging` module with specific loggers:
-- `pymongo.command`
-- `pymongo.connection`
-- `pymongo.serverSelection`
-- `pymongo.client`
-- `pymongo.topology`
+**Problem**: PyMongo uses Python's `logging` module. Native library uses Rust `tracing`.
 
-Native Rust library uses `tracing` with a global subscriber.
+**Solution**: Callback-based forwarding with filtering.
 
-**Solution Options**:
-1. **Callback-based**: Native library calls Python for each log message (high overhead)
-2. **Shared file/pipe**: Native library writes to a pipe, Python reads (complex)
-3. **Disable native logging**: Only use event listeners (loses some debug info)
-
-**Recommended**: Option 1 with filtering - only forward logs at DEBUG level or higher if Python logger is enabled at that level.
-
-```python
-@ffi.callback("void(int, const char*, void*)")
-def _log_callback(level, message, context):
-    logger = _level_to_logger(level)
-    if logger.isEnabledFor(_rust_level_to_python(level)):
-        logger.log(_rust_level_to_python(level), ffi.string(message).decode())
-```
-
-**Status**: Medium priority, can defer for prototype
+**Status**: Not implemented.
 
 ---
 
-### CHALLENGE-6: TLS/SSL Configuration (MEDIUM)
+### CHALLENGE-6: TLS/SSL Configuration
 
-**Problem**: PyMongo supports:
-- PEM certificate files (`tlsCertificateKeyFile`)
-- CA files (`tlsCAFile`)
-- CRL files (`tlsCRLFile`)
-- PyOpenSSL for OCSP support
+**Problem**: PyMongo supports TLS via PyOpenSSL. Native library uses rustls/native-tls.
 
-Native Rust library uses its own TLS stack (rustls or native-tls).
+**Solution**: Pass TLS file paths and options to native library via connection string.
 
-**Supported by Native FFI**:
-- PEM file paths (`tlsCertificateKeyFile`, `tlsCAFile`)
-- Connection string TLS parameters (`tls`, `tlsAllowInvalidCertificates`, etc.)
-
-**Needs Verification**:
-- CRL files (`tlsCRLFile`) - need to verify native library support
-- OCSP - native library may handle natively via rustls/webpki
-
-**Solution**:
-- Pass file paths directly to native library
-- Most TLS configuration maps 1:1 to connection string parameters
-
-**Status**: Mostly straightforward, verify CRL/OCSP support
+**Status**: Implemented.
 
 ---
 
-### CHALLENGE-7: Authentication (HIGH)
+### CHALLENGE-7: Authentication
 
-**Handled Natively**:
-- SCRAM-SHA-1, SCRAM-SHA-256
-- MONGODB-X509
-- PLAIN (LDAP)
+**Handled Natively**: SCRAM-SHA-1, SCRAM-SHA-256, MONGODB-X509, PLAIN (LDAP), MONGODB-AWS.
 
-**Requires Callbacks**:
-- **MONGODB-AWS**: If using environment/EC2 metadata, native library handles it. Custom credential providers need callback.
-- **MONGODB-OIDC**: Needs callback for token refresh
+**Requires Callbacks**: MONGODB-OIDC needs callback for token refresh.
 
-**Solution**: Similar to Java - register credential provider callbacks:
-```python
-@ffi.callback("void(CredentialRequest*, CredentialResponse*, void*)")
-def _credential_callback(request, response, context):
-    provider = ffi.from_handle(context)
-    creds = provider.get_credentials()
-    response.access_token = ffi.new("char[]", creds.access_token.encode())
-    # etc.
-```
-
-**Status**: Design needed for OIDC callback interface
+**Status**: Design complete for built-in auth. OIDC/AWS callbacks not implemented.
 
 ---
 
-### CHALLENGE-8: Client-Side Field Level Encryption (HIGH)
+### CHALLENGE-8: Client-Side Field Level Encryption
 
-**Problem**: PyMongo uses `pymongocrypt` (Python bindings to libmongocrypt).
+**Problem**: Auto-encryption is integrated into the command execution path, which native library now owns.
 
-**Why Python's pymongocrypt won't work**: Auto-encryption is deeply integrated into the command execution path:
-1. Driver intercepts command
-2. Consults encryption schema (requires server connection)
-3. Encrypts fields via libmongocrypt
-4. Sends encrypted command
-5. Decrypts response
+**Solution**: Use native library's built-in libmongocrypt integration.
 
-Since the native library now owns the entire command execution path (connections, retries, wire protocol), Python can't sit "outside" this loop and do encryption separately. The encryption must happen *inside* the native library.
-
-**Solution**: Use the native library's built-in libmongocrypt integration. Configuration (key vault, KMS providers, schema maps) passed at client creation time.
-
-**Explicit Encryption**: `ClientEncryption` for manual encrypt/decrypt operations may still use Python's pymongocrypt since it's not in the CRUD path.
-
-**Status**: Requires native library CSFLE support; defer to Phase 2
+**Status**: Not implemented. Requires native library CSFLE support to pass auto-encryption options through
 
 ---
 
-### CHALLENGE-9: Sessions and Transactions (MEDIUM)
+### CHALLENGE-9: Sessions and Transactions 
 
-**Current PyMongo Pattern**:
-```python
-with client.start_session() as session:
-    with session.start_transaction():
-        coll.insert_one({"x": 1}, session=session)
-        coll.update_one({"x": 1}, {"$set": {"y": 2}}, session=session)
-```
+**Problem**: Sessions and transactions need to pass session handle to all operations.
 
-**FFI Requirement**: Session handle from native library, passed to all operations.
+**Solution**: `ClientSession` wraps `NativeSyncSession`. Session handle passed to FFI operations.
+`SessionOptions` and `TransactionOptions` fully wired up.
 
-**Solution**:
-```python
-class NativeClientSession:
-    def __init__(self, session_handle: ffi.CData):
-        self._handle = session_handle
-
-    def start_transaction(self, **options):
-        lib.mongo_session_start_transaction(self._handle, ...)
-
-    def commit_transaction(self):
-        lib.mongo_session_commit_transaction(self._handle, ...)
-
-    def abort_transaction(self):
-        lib.mongo_session_abort_transaction(self._handle, ...)
-```
-
-**Status**: Straightforward mapping to native FFI
+**Status**: Implemented.
 
 ---
 
-### CHALLENGE-10: Cursor Lifecycle (MEDIUM - SOLVED)
+### CHALLENGE-10: Cursor Lifecycle
 
-**Problem**: Cursors need to be properly closed, support iteration, getMore, etc.
+**Problem**: Cursors need proper iteration, getMore, and cleanup.
 
-**Implementation**:
-```python
-class NativeSyncCursor:
-    def __init__(self, native_client, cursor_handle, exhausted, first_batch, codec_options, session_handle=None):
-        self._native = native_client
-        self._cursor = cursor_handle
-        self._exhausted = exhausted
-        self._buffer = first_batch  # Use list directly from C extension
-        self._index = 0
-        self._codec_options = codec_options
-        self._session = session_handle
-        self._closed = False
+**Solution**: `NativeSyncCursor` with list+index pattern (not deque) for GC-friendly iteration.
+Uses `_decode_batch` C extension for batch decoding.
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        if self._index < len(self._buffer):
-            doc = self._buffer[self._index]
-            self._buffer[self._index] = None  # Allow GC
-            self._index += 1
-            return doc
-        if self._exhausted or self._closed:
-            raise StopIteration
-        self._fetch_batch()
-        if self._index < len(self._buffer):
-            doc = self._buffer[self._index]
-            self._buffer[self._index] = None
-            self._index += 1
-            return doc
-        raise StopIteration
-
-    def _fetch_batch(self):
-        # Use C extension for batch decoding - pass FFI pointers directly
-        def convert(result):
-            exhausted, batch = result
-            if batch.data == ffi.NULL or batch.len == 0:
-                return exhausted, []
-            data_ptr = cast_to_int(batch.data)
-            docs = _decode_batch(data_ptr, batch.len, self._codec_options)
-            return exhausted, docs
-
-        bridge = SyncCallbackBridge(convert)
-        self._native.cursor_get_more(self._cursor, callback, bridge.handle, session=self._session)
-        self._exhausted, new_docs = bridge.wait()
-        self._buffer = new_docs
-        self._index = 0
-```
-
-**Key details**:
-1. Use list with index instead of deque - avoids copying the decoded list
-2. Null out elements after returning to allow GC
-3. Use `_decode_batch` C extension to decode all docs in batch without Python loop
-4. Cache `uintptr_t` type to avoid pycparser overhead on each pointer cast
-
-**Status**: Complete
-
----
-
-### CHALLENGE-11: Read/Write Concern and Read Preference (LOW)
-
-**Problem**: Need to pass these settings to Rust FFI.
-
-**Solution**: Marshal to FFI structs:
-```python
-def marshal_read_preference(rp: ReadPreference) -> ffi.CData:
-    rp_struct = ffi.new("ReadPreference*")
-    rp_struct.mode = rp.mode
-    rp_struct.tag_sets = marshal_tag_sets(rp.tag_sets)
-    rp_struct.max_staleness_seconds = rp.max_staleness
-    return rp_struct
-```
-
-**Status**: Straightforward
-
----
-
-### CHALLENGE-12: GridFS (LOW)
-
-**Problem**: GridFS is built on top of collections.
-
-**Solution**: If collections use native FFI, GridFS automatically benefits. No special handling needed.
-
-**Status**: Automatic
-
----
-
-### CHALLENGE-13: Change Streams (MEDIUM)
-
-**Problem**: Long-running cursors that need to handle resume tokens, network errors, etc.
-
-**Solution**: Similar to cursors, but with:
-- Resume token tracking in Python
-- Automatic resume on recoverable errors (handled by native library)
-
-**Status**: Design needed
-
----
-
-### CHALLENGE-14: Aggregation (LOW)
-
-**Problem**: Aggregation pipelines are just BSON arrays.
-
-**Solution**: Encode pipeline as BSON array, pass to `mongo_aggregate()`:
-```python
-def aggregate(self, pipeline: List[dict], **options):
-    pipeline_bytes = bson.encode({"pipeline": pipeline})
-    return NativeCursor(lib.mongo_aggregate(self._client, ..., pipeline_bytes, ...))
-```
-
-**Status**: Straightforward
-
----
-
-## Implementation Plan
-
-### Phase 1: Core Infrastructure
-1. Set up `pymongo/native_bindings/` module structure
-2. cffi build system integration (setup.py/pyproject.toml)
-3. Library loading (`libmongocore.so/.dylib/.dll`)
-4. Basic error conversion
-5. BSON marshalling
-6. Callback bridges (`AsyncCallbackBridge`, `SyncCallbackBridge`)
-
-### Phase 2: Basic CRUD
-1. `NativeClient` (callback-based, sync/async agnostic)
-2. Basic cursor implementation (`NativeCursor`)
-3. Integration with existing `AsyncCollection`/`Collection` using callback bridges
-4. `insert_one`, `find_one`, `update_one`, `delete_one`
-
-### Phase 3: Full CRUD + Sessions
-1. All CRUD operations
-2. Bulk writes
-3. Sessions and transactions
-4. Aggregation
-
-### Phase 4: Advanced Features
-1. Event listeners / monitoring
-2. Change streams
-3. Read/write concerns
-4. Authentication callbacks (OIDC)
-
-### Phase 5: Production Hardening
-1. Error handling edge cases
-2. Memory leak testing
-3. Thread safety verification
-4. Performance benchmarking
-5. Documentation
+**Status**: Implemented.
 
 ## File Structure
 
 ```
 pymongo/
-├── _cnativemodule.c           # C extension for batch BSON encoding/decoding
+├── _cnativemodule.c              # C extension for batch BSON encoding/decoding
 ├── native_bindings/
-│   ├── __init__.py            # Exports NativeSyncMongoClient
-│   ├── _ffi.py                # cffi definitions (from libmongodb.h), cast_to_int helper
-│   ├── _loader.py             # Library loading logic (LIBMONGODB_PATH env var)
-│   ├── _callbacks.py          # SyncCallbackBridge (threading.Event based)
-│   ├── _client.py             # NativeClient (low-level FFI wrapper)
-│   └── sync_client.py         # NativeSyncMongoClient, NativeSyncDatabase,
-│                              # NativeSyncCollection, NativeSyncCursor
+│   ├── __init__.py               # Exports NativeSyncMongoClient, NativeAsyncMongoClient
+│   ├── _ffi.py                   # cffi definitions, cast_to_int helper
+│   ├── _loader.py                # Library loading (LIBMONGODB_PATH env var)
+│   ├── _callbacks.py             # SyncCallbackBridge, AsyncCallbackBridge
+│   ├── _client.py                # NativeClient (low-level FFI wrapper)
+│   ├── sync_client.py            # NativeSyncMongoClient, NativeSyncSession, etc.
+│   └── async_client.py           # NativeAsyncMongoClient, NativeAsyncSession, etc.
+├── synchronous/
+│   ├── mongo_client.py           # Thin wrapper delegating to native
+│   ├── database.py               # Thin wrapper delegating to native
+│   ├── collection.py             # Thin wrapper delegating to native
+│   └── client_session.py         # ClientSession wrapping NativeSyncSession
+├── asynchronous/
+│   ├── mongo_client.py           # Async wrapper delegating to native
+│   ├── database.py               # Async wrapper delegating to native
+│   ├── collection.py             # Async wrapper delegating to native
+│   └── client_session.py         # AsyncClientSession wrapping NativeAsyncSession
 bson/
-├── _cbsonmodule.c             # Extended C API with elements_to_dict
-├── _cbsonmodule.h             # C API capsule definitions
+├── _cbsonmodule.c                # Extended C API with elements_to_dict
+├── _cbsonmodule.h                # C API capsule definitions
 ```
 
-**Integration Pattern**: `MongoClient` creates a `NativeSyncMongoClient` and delegates
-CRUD operations to it. The native bindings use `SyncCallbackBridge` to convert
-callback-based FFI to blocking Python calls.
+**Integration Pattern**: `MongoClient` and `AsyncMongoClient` are thin wrappers that
+delegate to native bindings. All SDAM, connection pooling, and wire protocol is handled
+by the native library.
 
 ## Performance Results
 
-Benchmarks run with PyMongo's driver benchmark suite (7 tests matching Java driver-benchmarks):
+Benchmarks run with PyMongo's driver benchmark suite:
 
 ```
 Benchmark              PyMongo   Native    Rust     vs PyMongo

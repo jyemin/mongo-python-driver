@@ -46,6 +46,69 @@ class UnsupportedOperationError(Exception):
     pass
 
 
+def _read_preference_to_mode(rp) -> int:
+    """Convert a ReadPreference to FFI mode integer."""
+    if rp is None:
+        return 0  # Primary
+    if isinstance(rp, int):
+        return rp
+    # Handle ReadPreference objects
+    if hasattr(rp, 'mode'):
+        return rp.mode
+    # Handle string names
+    mode_map = {
+        "primary": 0,
+        "primaryPreferred": 1,
+        "secondary": 2,
+        "secondaryPreferred": 3,
+        "nearest": 4,
+    }
+    return mode_map.get(str(rp), 0)
+
+
+def _build_native_client_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Map PyMongo parameter names to NativeClient parameter names.
+
+    Shared by sync and async client implementations.
+    """
+    # Handle compressors list -> comma-separated string
+    compressors = kwargs.get("compressors")
+    if compressors and isinstance(compressors, (list, tuple)):
+        compressors = ",".join(compressors)
+
+    return {
+        # Connection settings
+        "app_name": kwargs.get("appName") or kwargs.get("appname"),
+        "compressors": compressors,
+        "direct_connection": kwargs.get("directConnection", False),
+        "load_balanced": kwargs.get("loadBalanced", False),
+        "max_pool_size": kwargs.get("maxPoolSize", -1),
+        "min_pool_size": kwargs.get("minPoolSize", -1),
+        "max_idle_time_ms": kwargs.get("maxIdleTimeMS", -1),
+        "connect_timeout_ms": kwargs.get("connectTimeoutMS", -1),
+        "socket_timeout_ms": kwargs.get("socketTimeoutMS", -1),
+        "server_selection_timeout_ms": kwargs.get("serverSelectionTimeoutMS", -1),
+        "local_threshold_ms": kwargs.get("localThresholdMS", -1),
+        "heartbeat_frequency_ms": kwargs.get("heartbeatFrequencyMS", -1),
+        "replica_set": kwargs.get("replicaSet"),
+        "read_preference_mode": _read_preference_to_mode(kwargs.get("readPreference")),
+        "srv_service_name": kwargs.get("srvServiceName"),
+        "srv_max_hosts": kwargs.get("srvMaxHosts", -1),
+        # Auth settings
+        "username": kwargs.get("username"),
+        "password": kwargs.get("password"),
+        "auth_source": kwargs.get("authSource"),
+        "auth_mechanism": kwargs.get("authMechanism"),
+        # TLS settings
+        "tls": kwargs.get("tls", False),
+        "tls_allow_invalid_certificates": kwargs.get("tlsAllowInvalidCertificates", False),
+        "tls_allow_invalid_hostnames": kwargs.get("tlsAllowInvalidHostnames", False),
+        "tls_ca_file": kwargs.get("tlsCAFile"),
+        "tls_cert_file": kwargs.get("tlsCertificateFile"),
+        "tls_certificate_key_file": kwargs.get("tlsCertificateKeyFile"),
+    }
+
+
 # =============================================================================
 # FFI Callbacks - module level to avoid GC issues
 # =============================================================================
@@ -182,20 +245,7 @@ class NativeSyncMongoClient:
         else:
             hosts = f"{host}:{port}"
 
-        self._native = NativeClient(
-            hosts,
-            app_name=kwargs.get("appName") or kwargs.get("appname"),
-            direct_connection=kwargs.get("directConnection", False),
-            server_selection_timeout_ms=kwargs.get("serverSelectionTimeoutMS", 30000),
-            connect_timeout_ms=kwargs.get("connectTimeoutMS", 20000),
-            username=kwargs.get("username"),
-            password=kwargs.get("password"),
-            auth_source=kwargs.get("authSource"),
-            auth_mechanism=kwargs.get("authMechanism"),
-            tls=kwargs.get("tls", False),
-            tls_ca_file=kwargs.get("tlsCAFile"),
-            tls_certificate_key_file=kwargs.get("tlsCertificateKeyFile"),
-        )
+        self._native = NativeClient(hosts, **_build_native_client_kwargs(kwargs))
         self._codec_options = kwargs.get("codec_options", DEFAULT_CODEC_OPTIONS)
 
     def close(self) -> None:
