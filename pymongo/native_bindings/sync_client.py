@@ -33,6 +33,13 @@ from pymongo.native_bindings._client import NativeClient
 from pymongo.native_bindings._callbacks import SyncCallbackBridge
 from pymongo.native_bindings._ffi import ffi
 
+# Try to import C extension for faster insert_many
+try:
+    from pymongo._cnative import _prepare_insert_many
+    _USE_C_NATIVE = True
+except ImportError:
+    _USE_C_NATIVE = False
+
 
 class UnsupportedOperationError(Exception):
     """Raised when an operation is not supported by the native driver FFI."""
@@ -370,15 +377,18 @@ class NativeSyncCollection:
         Returns:
             InsertManyResult with inserted_ids.
         """
-        # Add _ids if not present and encode
-        docs_with_ids = []
-        doc_bytes_list = []
-        for doc in documents:
-            d = dict(doc)
-            if "_id" not in d:
-                d["_id"] = ObjectId()
-            docs_with_ids.append(d)
-            doc_bytes_list.append(bson.encode(d, codec_options=self._codec_options))
+        # Prepare documents: add _ids if not present and encode to BSON
+        if _USE_C_NATIVE:
+            doc_bytes_list, id_list = _prepare_insert_many(documents, self._codec_options)
+        else:
+            id_list = []
+            doc_bytes_list = []
+            for doc in documents:
+                d = dict(doc)
+                if "_id" not in d:
+                    d["_id"] = ObjectId()
+                id_list.append(d["_id"])
+                doc_bytes_list.append(bson.encode(d, codec_options=self._codec_options))
 
         session_handle = session._handle if session else None
 
@@ -394,10 +404,8 @@ class NativeSyncCollection:
             bypass_document_validation=bypass_document_validation,
             session=session_handle,
         )
-        ids_dict = bridge.wait()
-        # Return _ids in order
-        inserted_ids = [ids_dict.get(i, docs_with_ids[i]["_id"]) for i in range(len(docs_with_ids))]
-        return InsertManyResult(inserted_ids, acknowledged=True)
+        bridge.wait()  # We already have the IDs from preparation
+        return InsertManyResult(list(id_list), acknowledged=True)
 
     # -------------------------------------------------------------------------
     # Find Operations

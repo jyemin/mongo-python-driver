@@ -70,11 +70,10 @@ from pymongo import (
 
 pytestmark = pytest.mark.perf
 
-# Spec says to use at least 1 minute cumulative execution time and up to 100 iterations or 5 minutes but that
-# makes the benchmarks too slow. Instead, we use at least 30 seconds and at most 60 seconds.
+# Match Java driver benchmark settings: 60s min, 300s max, 100 iterations
 NUM_ITERATIONS = 100
-MIN_ITERATION_TIME = 30
-MAX_ITERATION_TIME = 60
+MIN_ITERATION_TIME = 60
+MAX_ITERATION_TIME = 300
 NUM_DOCS = 10000
 # When debugging or prototyping it's often useful to run the benchmarks locally, set FASTBENCH=1 to run quickly.
 if bool(os.getenv("FASTBENCH")):

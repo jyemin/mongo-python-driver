@@ -1,0 +1,135 @@
+[
+    {
+        "info": {
+            "test_name": "RunCommand",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 0.16546637253958316,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    },
+    {
+        "info": {
+            "test_name": "FindOneByID",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 13.590636663849585,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    },
+    {
+        "info": {
+            "test_name": "SmallDocInsertOne",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 2.6277927378427304,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    },
+    {
+        "info": {
+            "test_name": "LargeDocInsertOne",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 375.32416669055374,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    },
+    {
+        "info": {
+            "test_name": "FindManyAndEmptyCursor",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 223.8516818118245,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    },
+    {
+        "info": {
+            "test_name": "SmallDocBulkInsert",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 113.19708177943393,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    },
+    {
+        "info": {
+            "test_name": "LargeDocBulkInsert",
+            "args": {
+                "threads": 1
+            }
+        },
+        "metrics": [
+            {
+                "name": "megabytes_per_sec",
+                "type": "MEDIAN",
+                "value": 341.0272941435864,
+                "metadata": {
+                    "improvement_direction": "up",
+                    "measurement_unit": "megabytes_per_second"
+                }
+            }
+        ]
+    }
+]
