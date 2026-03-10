@@ -88,7 +88,7 @@ class Database:
 
     def drop(self, **kwargs: Any) -> None:
         """Drop the database."""
-        self.command("dropDatabase")
+        self._client._native[self._name].drop()
 
     # Unsupported operations
     def list_collections(self, **kwargs: Any) -> Any:

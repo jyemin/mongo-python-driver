@@ -81,7 +81,7 @@ class AsyncDatabase:
 
     async def drop(self, **kwargs: Any) -> None:
         """Drop the database."""
-        await self.command("dropDatabase")
+        await self._client._native[self._name].drop()
 
     # Unsupported operations
     async def list_collections(self, **kwargs: Any) -> Any:
