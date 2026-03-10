@@ -123,6 +123,135 @@ error:
 }
 
 /*
+ * Encode documents to a contiguous BSON buffer.
+ *
+ * Takes a sequence of documents (with _ids already added) and codec_options.
+ * Returns tuple of (buffer_bytes, pointer_list) where:
+ *   - buffer_bytes: single bytes object containing all encoded BSON docs
+ *   - pointer_list: list of integers (memory addresses) pointing to each doc
+ *
+ * The caller must keep buffer_bytes alive as long as pointers are used.
+ */
+static PyObject*
+_cnative_encode_docs_contiguous(PyObject* self, PyObject* args) {
+    PyObject* documents;
+    PyObject* codec_options_obj;
+    struct module_state* state = GETSTATE(self);
+    codec_options_t options;
+
+    if (!PyArg_ParseTuple(args, "OO", &documents, &codec_options_obj)) {
+        return NULL;
+    }
+
+    /* Convert codec options to C struct */
+    if (!convert_codec_options(state->_cbson, codec_options_obj, &options)) {
+        return NULL;
+    }
+
+    /* Get list size for pre-allocation */
+    Py_ssize_t count = PySequence_Size(documents);
+    if (count < 0) {
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    /* Create a single buffer for all documents */
+    buffer_t buffer = pymongo_buffer_new();
+    if (buffer == NULL) {
+        destroy_codec_options(&options);
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    /* Track offsets where each document starts */
+    Py_ssize_t* offsets = (Py_ssize_t*)malloc(sizeof(Py_ssize_t) * count);
+    if (offsets == NULL) {
+        pymongo_buffer_free(buffer);
+        destroy_codec_options(&options);
+        PyErr_NoMemory();
+        return NULL;
+    }
+
+    /* Encode each document into the buffer */
+    PyObject* iter = PyObject_GetIter(documents);
+    if (iter == NULL) {
+        free(offsets);
+        pymongo_buffer_free(buffer);
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    Py_ssize_t i = 0;
+    PyObject* doc;
+    while ((doc = PyIter_Next(iter)) != NULL) {
+        /* Record offset before encoding */
+        offsets[i] = pymongo_buffer_get_position(buffer);
+
+        /* Encode document directly into the shared buffer */
+        int size = write_dict(state->_cbson, buffer, doc, 0, &options, 1);
+        Py_DECREF(doc);
+
+        if (!size) {
+            Py_DECREF(iter);
+            free(offsets);
+            pymongo_buffer_free(buffer);
+            destroy_codec_options(&options);
+            return NULL;
+        }
+        i++;
+    }
+    Py_DECREF(iter);
+
+    if (PyErr_Occurred()) {
+        free(offsets);
+        pymongo_buffer_free(buffer);
+        destroy_codec_options(&options);
+        return NULL;
+    }
+
+    /* Create Python bytes from the buffer */
+    PyObject* buffer_bytes = PyBytes_FromStringAndSize(
+        pymongo_buffer_get_buffer(buffer),
+        (Py_ssize_t)pymongo_buffer_get_position(buffer));
+    pymongo_buffer_free(buffer);
+    destroy_codec_options(&options);
+
+    if (buffer_bytes == NULL) {
+        free(offsets);
+        return NULL;
+    }
+
+    /* Get base pointer of the bytes object */
+    char* base_ptr = PyBytes_AS_STRING(buffer_bytes);
+
+    /* Create list of pointer integers */
+    PyObject* ptr_list = PyList_New(count);
+    if (ptr_list == NULL) {
+        free(offsets);
+        Py_DECREF(buffer_bytes);
+        return NULL;
+    }
+
+    for (i = 0; i < count; i++) {
+        PyObject* ptr_int = PyLong_FromVoidPtr(base_ptr + offsets[i]);
+        if (ptr_int == NULL) {
+            free(offsets);
+            Py_DECREF(ptr_list);
+            Py_DECREF(buffer_bytes);
+            return NULL;
+        }
+        PyList_SET_ITEM(ptr_list, i, ptr_int);  /* Steals ref */
+    }
+    free(offsets);
+
+    /* Return tuple of (buffer_bytes, ptr_list) */
+    PyObject* result = PyTuple_Pack(2, buffer_bytes, ptr_list);
+    Py_DECREF(buffer_bytes);
+    Py_DECREF(ptr_list);
+    return result;
+}
+
+/*
  * Decode BSON documents from an FFI BsonArray.
  *
  * Takes:
@@ -188,6 +317,10 @@ static PyMethodDef _cnative_methods[] = {
      "Encode documents to BSON bytes.\n\n"
      "Takes documents (with _ids) and codec_options.\n"
      "Returns list of BSON bytes."},
+    {"_encode_docs_contiguous", _cnative_encode_docs_contiguous, METH_VARARGS,
+     "Encode documents to a contiguous BSON buffer.\n\n"
+     "Takes documents (with _ids) and codec_options.\n"
+     "Returns (buffer_bytes, pointer_list)."},
     {"_decode_batch", _cnative_decode_batch, METH_VARARGS,
      "Decode BSON documents from FFI BsonArray.\n\n"
      "Takes data_ptr (int), count, and codec_options.\n"

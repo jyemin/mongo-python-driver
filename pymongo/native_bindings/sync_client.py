@@ -35,7 +35,7 @@ from pymongo.native_bindings._ffi import ffi, cast_to_int
 
 # Try to import C extension for faster BSON encoding/decoding
 try:
-    from pymongo._cnative import _encode_docs, _decode_batch
+    from pymongo._cnative import _encode_docs, _encode_docs_contiguous, _decode_batch
     _USE_C_NATIVE = True
 except ImportError:
     _USE_C_NATIVE = False
@@ -390,11 +390,22 @@ class NativeSyncCollection:
                 doc["_id"] = ObjectId()
             id_list.append(doc["_id"])
 
-        # Encode to BSON - use C extension if available
+        # Encode to BSON
         if _USE_C_NATIVE:
-            doc_bytes_list = _encode_docs(documents, self._codec_options)
+            # Contiguous buffer + pointer list - no Python loop for pointer creation
+            buffer, pointer_list = _encode_docs_contiguous(documents, self._codec_options)
         else:
+            # Fallback: encode each doc separately
             doc_bytes_list = [bson.encode(d, codec_options=self._codec_options) for d in documents]
+            # Create fake buffer/pointer_list for unified API
+            buffer = b''.join(doc_bytes_list)
+            import ctypes
+            pointer_list = []
+            offset = 0
+            for doc_bytes in doc_bytes_list:
+                ptr = ctypes.cast(ctypes.c_char_p(buffer), ctypes.c_void_p).value + offset
+                pointer_list.append(ptr)
+                offset += len(doc_bytes)
 
         session_handle = session._handle if session else None
 
@@ -402,7 +413,8 @@ class NativeSyncCollection:
         self._database._client._native.insert_many(
             self._database.name,
             self._name,
-            doc_bytes_list,
+            buffer,
+            pointer_list,
             _insert_many_cb,
             bridge.handle,
             bridge._refs,  # keepalive
