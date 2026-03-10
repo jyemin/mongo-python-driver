@@ -30,7 +30,7 @@ from bson.codec_options import CodecOptions, DEFAULT_CODEC_OPTIONS
 from pymongo.results import InsertOneResult, InsertManyResult
 from pymongo.native_bindings._client import NativeClient
 from pymongo.native_bindings._callbacks import AsyncCallbackBridge
-from pymongo.native_bindings._ffi import ffi
+from pymongo.native_bindings._ffi import ffi, cast_to_int
 from pymongo.native_bindings.sync_client import (
     UnsupportedOperationError,
     _insert_one_cb,
@@ -40,10 +40,14 @@ from pymongo.native_bindings.sync_client import (
     _void_cb,
     _get_more_cb,
     _convert_insert_one,
-    _convert_insert_many,
     _convert_find,
     _convert_command,
+    _USE_C_NATIVE,
 )
+
+# Import C extension if available
+if _USE_C_NATIVE:
+    from pymongo._cnative import _encode_docs, _decode_batch
 
 
 class NativeAsyncMongoClient:
@@ -169,24 +173,27 @@ class NativeAsyncCollection:
                           bypass_document_validation: bool = False,
                           session: Optional["NativeAsyncSession"] = None, **kwargs) -> InsertManyResult:
         """Insert multiple documents."""
-        docs_with_ids = []
-        doc_bytes_list = []
+        # Add _ids if not present (must happen in Python to track inserted_ids)
+        id_list = []
         for doc in documents:
-            d = dict(doc)
-            if "_id" not in d:
-                d["_id"] = ObjectId()
-            docs_with_ids.append(d)
-            doc_bytes_list.append(bson.encode(d, codec_options=self._codec_options))
+            if "_id" not in doc:
+                doc["_id"] = ObjectId()
+            id_list.append(doc["_id"])
+
+        # Encode to BSON - use C extension if available
+        if _USE_C_NATIVE:
+            doc_bytes_list = _encode_docs(documents, self._codec_options)
+        else:
+            doc_bytes_list = [bson.encode(d, codec_options=self._codec_options) for d in documents]
 
         session_handle = session._handle if session else None
-        bridge = AsyncCallbackBridge(lambda r: _convert_insert_many(r, self._codec_options))
+        bridge = AsyncCallbackBridge(lambda r: None)  # We already have the IDs
         self._database._client._native.insert_many(
             self._database.name, self._name, doc_bytes_list, _insert_many_cb, bridge.handle, bridge._refs,
             ordered=ordered, bypass_document_validation=bypass_document_validation, session=session_handle,
         )
-        ids_dict = await bridge.future
-        inserted_ids = [ids_dict.get(i, docs_with_ids[i]["_id"]) for i in range(len(docs_with_ids))]
-        return InsertManyResult(inserted_ids, acknowledged=True)
+        await bridge.future
+        return InsertManyResult(list(id_list), acknowledged=True)
 
     async def find_one(self, filter: Optional[Mapping[str, Any]] = None,
                        session: Optional["NativeAsyncSession"] = None, **kwargs) -> Optional[Dict[str, Any]]:
@@ -254,6 +261,7 @@ class NativeAsyncCursor:
         self._cursor = None
         self._exhausted = False
         self._buffer: List[Dict[str, Any]] = []
+        self._index = 0
         self._started = False
         self._closed = False
 
@@ -270,7 +278,8 @@ class NativeAsyncCursor:
             batch_size=self._batch_size, session=self._session,
         )
         self._cursor, self._exhausted, first_batch = await bridge.future
-        self._buffer.extend(first_batch)
+        self._buffer = first_batch
+        self._index = 0
 
     def __aiter__(self) -> "NativeAsyncCursor":
         return self
@@ -279,16 +288,22 @@ class NativeAsyncCursor:
         if not self._started:
             await self._start()
 
-        if self._buffer:
-            return self._buffer.pop(0)
+        if self._index < len(self._buffer):
+            doc = self._buffer[self._index]
+            self._buffer[self._index] = None  # Allow GC
+            self._index += 1
+            return doc
 
         if self._exhausted or self._closed:
             raise StopAsyncIteration
 
         await self._fetch_batch()
 
-        if self._buffer:
-            return self._buffer.pop(0)
+        if self._index < len(self._buffer):
+            doc = self._buffer[self._index]
+            self._buffer[self._index] = None  # Allow GC
+            self._index += 1
+            return doc
         raise StopAsyncIteration
 
     async def _fetch_batch(self) -> None:
@@ -296,20 +311,31 @@ class NativeAsyncCursor:
         if self._exhausted or self._closed or self._cursor is None or self._cursor == ffi.NULL:
             return
 
+        codec_opts = self._codec_options
+
         def convert(result):
             exhausted, batch = result
-            docs = []
-            if batch.data != ffi.NULL:
+            if batch.data == ffi.NULL or batch.len == 0:
+                return exhausted, []
+
+            if _USE_C_NATIVE:
+                # Pass FFI pointers directly to C extension - no Python loop needed
+                data_ptr = cast_to_int(batch.data)
+                docs = _decode_batch(data_ptr, batch.len, codec_opts)
+            else:
+                # Fallback: decode each document separately
+                docs = []
                 for i in range(batch.len):
                     ptr = batch.data[i]
                     length = int.from_bytes(ffi.buffer(ptr, 4)[:], "little")
-                    docs.append(bson.decode(ffi.buffer(ptr, length)[:], codec_options=self._codec_options))
+                    docs.append(bson.decode(ffi.buffer(ptr, length)[:], codec_options=codec_opts))
             return exhausted, docs
 
         bridge = AsyncCallbackBridge(convert)
         self._native.cursor_get_more(self._cursor, _get_more_cb, bridge.handle, session=self._session)
         self._exhausted, new_docs = await bridge.future
-        self._buffer.extend(new_docs)
+        self._buffer = new_docs
+        self._index = 0
 
     async def close(self) -> None:
         """Close the cursor."""

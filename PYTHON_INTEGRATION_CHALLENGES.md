@@ -234,7 +234,7 @@ def _event_callback(event_type, data_ptr, data_len, context):
 - `pymongo.client`
 - `pymongo.topology`
 
-Native library uses `tracing` with a global subscriber.
+Native Rust library uses `tracing` with a global subscriber.
 
 **Solution Options**:
 1. **Callback-based**: Native library calls Python for each log message (high overhead)
@@ -263,7 +263,7 @@ def _log_callback(level, message, context):
 - CRL files (`tlsCRLFile`)
 - PyOpenSSL for OCSP support
 
-Native library uses its own TLS stack (rustls or native-tls).
+Native Rust library uses its own TLS stack (rustls or native-tls).
 
 **Supported by Native FFI**:
 - PEM file paths (`tlsCertificateKeyFile`, `tlsCAFile`)
