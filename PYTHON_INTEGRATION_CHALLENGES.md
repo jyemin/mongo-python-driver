@@ -218,13 +218,6 @@ by the native library.
 
 See [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) for current benchmark comparison.
 
-## Open Questions
-
-1. **Library Distribution**: Platform-specific wheels with bundled native library?
-2. **Fallback**: Should the driver fall back to pure-Python if native library unavailable?
-3. **Feature Detection**: How to detect which features are supported by native library version?
-4. **Testing**: How to test both native and pure-Python paths?
-
 ## References
 
 - cffi documentation: https://cffi.readthedocs.io/
