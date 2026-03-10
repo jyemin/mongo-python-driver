@@ -514,12 +514,19 @@ class NativeClient:
     # Session Operations
     # -------------------------------------------------------------------------
 
-    def session_start(self, *, causal_consistency: bool = True, snapshot: bool = False):
+    def session_start(
+        self,
+        *,
+        causal_consistency: bool = True,
+        snapshot: bool = False,
+        default_transaction_options: Optional[Dict[str, Any]] = None,
+    ):
         """Start a new client session.
 
         Args:
             causal_consistency: Enable causal consistency.
             snapshot: Enable snapshot reads.
+            default_transaction_options: Default options for transactions.
 
         Returns:
             Session handle to pass to operations.
@@ -530,7 +537,40 @@ class NativeClient:
         opts = ffi.new("SessionOptions *")
         opts.causal_consistency = 1 if causal_consistency else 0
         opts.snapshot = 1 if snapshot else 0
-        opts.default_transaction_options = ffi.NULL
+
+        # Build default transaction options if provided
+        if default_transaction_options:
+            txn_opts = ffi.new("TransactionOptions *")
+            rc = default_transaction_options.get("read_concern")
+            if rc and hasattr(rc, "level") and rc.level:
+                txn_opts.read_concern_level = ffi.new("char[]", rc.level.encode("utf-8"))
+            else:
+                txn_opts.read_concern_level = ffi.NULL
+
+            wc = default_transaction_options.get("write_concern")
+            if wc:
+                txn_opts.write_concern_w = getattr(wc, "w", 0) if isinstance(getattr(wc, "w", None), int) else 0
+                wtag = getattr(wc, "w", None)
+                if isinstance(wtag, str):
+                    txn_opts.write_concern_w_tag = ffi.new("char[]", wtag.encode("utf-8"))
+                else:
+                    txn_opts.write_concern_w_tag = ffi.NULL
+                txn_opts.write_concern_j = 1 if getattr(wc, "j", False) else -1
+                txn_opts.write_concern_w_timeout_ms = getattr(wc, "wtimeout", -1) or -1
+            else:
+                txn_opts.write_concern_w = 0
+                txn_opts.write_concern_w_tag = ffi.NULL
+                txn_opts.write_concern_j = -1
+                txn_opts.write_concern_w_timeout_ms = -1
+
+            rp = default_transaction_options.get("read_preference")
+            txn_opts.read_preference_mode = rp.mode if rp else 0
+
+            txn_opts.max_commit_time_ms = default_transaction_options.get("max_commit_time_ms", -1) or -1
+
+            opts.default_transaction_options = txn_opts
+        else:
+            opts.default_transaction_options = ffi.NULL
 
         error_out = ffi.new("Error **")
         session = self._lib.mongo_session_start(self._client, opts, error_out)
@@ -558,6 +598,7 @@ class NativeClient:
         session,
         callback: Callable,
         userdata: Any,
+        options: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Start a transaction on a session (async via callback).
 
@@ -565,11 +606,46 @@ class NativeClient:
             session: Session handle.
             callback: FFI callback function.
             userdata: FFI handle to pass to callback.
+            options: Transaction options dict.
         """
+        if options:
+            txn_opts = ffi.new("TransactionOptions *")
+            rc = options.get("read_concern")
+            if rc and hasattr(rc, "level") and rc.level:
+                txn_opts.read_concern_level = ffi.new("char[]", rc.level.encode("utf-8"))
+            else:
+                txn_opts.read_concern_level = ffi.NULL
+
+            wc = options.get("write_concern")
+            if wc:
+                txn_opts.write_concern_w = getattr(wc, "w", 0) if isinstance(getattr(wc, "w", None), int) else 0
+                wtag = getattr(wc, "w", None)
+                if isinstance(wtag, str):
+                    txn_opts.write_concern_w_tag = ffi.new("char[]", wtag.encode("utf-8"))
+                else:
+                    txn_opts.write_concern_w_tag = ffi.NULL
+                txn_opts.write_concern_j = 1 if getattr(wc, "j", False) else -1
+                txn_opts.write_concern_w_timeout_ms = getattr(wc, "wtimeout", -1) or -1
+            else:
+                # -1 means "use default" for these fields
+                txn_opts.write_concern_w = -1
+                txn_opts.write_concern_w_tag = ffi.NULL
+                txn_opts.write_concern_j = -1
+                txn_opts.write_concern_w_timeout_ms = -1
+
+            rp = options.get("read_preference")
+            txn_opts.read_preference_mode = rp.mode if rp else 0  # 0 = primary (default)
+
+            txn_opts.max_commit_time_ms = options.get("max_commit_time_ms", -1) or -1
+
+            opts_ptr = txn_opts
+        else:
+            opts_ptr = ffi.NULL
+
         self._lib.mongo_session_start_transaction(
             self._client,
             session,
-            ffi.NULL,  # options - use defaults
+            opts_ptr,
             callback,
             userdata,
         )

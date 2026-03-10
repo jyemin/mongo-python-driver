@@ -90,9 +90,18 @@ class NativeAsyncMongoClient:
     def get_database(self, name: str, codec_options: Optional[CodecOptions] = None) -> "NativeAsyncDatabase":
         return NativeAsyncDatabase(self, name, codec_options or self._codec_options)
 
-    def start_session(self, causal_consistency: bool = True, snapshot: bool = False) -> "NativeAsyncSession":
+    def start_session(
+        self,
+        causal_consistency: bool = True,
+        snapshot: bool = False,
+        default_transaction_options: Optional[Dict[str, Any]] = None,
+    ) -> "NativeAsyncSession":
         """Start a new client session."""
-        handle = self._native.session_start(causal_consistency=causal_consistency, snapshot=snapshot)
+        handle = self._native.session_start(
+            causal_consistency=causal_consistency,
+            snapshot=snapshot,
+            default_transaction_options=default_transaction_options,
+        )
         return NativeAsyncSession(self, handle)
 
 
@@ -384,11 +393,13 @@ class NativeAsyncSession:
             self._client._native.session_end(self._handle)
             self._ended = True
 
-    async def start_transaction(self) -> None:
+    async def start_transaction(self, options: Optional[Dict[str, Any]] = None) -> None:
         """Start a new transaction."""
         from pymongo.native_bindings.sync_client import _txn_cb
         bridge = AsyncCallbackBridge(lambda r: None)
-        self._client._native.session_start_transaction(self._handle, _txn_cb, bridge.handle)
+        self._client._native.session_start_transaction(
+            self._handle, _txn_cb, bridge.handle, options=options
+        )
         await bridge.future
 
     async def commit_transaction(self) -> None:

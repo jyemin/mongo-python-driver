@@ -15,10 +15,13 @@
 """Minimal AsyncMongoClient that delegates to native FFI."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from bson.codec_options import CodecOptions, DEFAULT_CODEC_OPTIONS
 from pymongo.asynchronous.database import AsyncDatabase
+
+if TYPE_CHECKING:
+    from pymongo.asynchronous.client_session import AsyncClientSession
 
 
 class AsyncMongoClient:
@@ -88,21 +91,47 @@ class AsyncMongoClient:
     def codec_options(self) -> CodecOptions:
         return self._codec_options
 
-    # Unsupported operations
-    async def start_session(self, **kwargs: Any) -> Any:
-        raise NotImplementedError("start_session not yet supported")
+    def start_session(self, **kwargs: Any) -> "AsyncClientSession":
+        """Start a client session."""
+        from pymongo.asynchronous.client_session import AsyncClientSession, SessionOptions
 
+        # Convert TransactionOptions to dict for FFI
+        default_txn_opts = kwargs.get("default_transaction_options")
+        txn_opts_dict = None
+        if default_txn_opts:
+            txn_opts_dict = {
+                "read_concern": getattr(default_txn_opts, "read_concern", None),
+                "write_concern": getattr(default_txn_opts, "write_concern", None),
+                "read_preference": getattr(default_txn_opts, "read_preference", None),
+                "max_commit_time_ms": getattr(default_txn_opts, "max_commit_time_ms", None),
+            }
+
+        native_session = self._native.start_session(
+            causal_consistency=kwargs.get("causal_consistency", True),
+            snapshot=kwargs.get("snapshot", False),
+            default_transaction_options=txn_opts_dict,
+        )
+        options = SessionOptions(
+            causal_consistency=kwargs.get("causal_consistency"),
+            default_transaction_options=default_txn_opts,
+            snapshot=kwargs.get("snapshot"),
+        )
+        return AsyncClientSession(self, native_session, options)
+
+    async def drop_database(self, name: str, **kwargs: Any) -> None:
+        """Drop a database."""
+        await self._native[name].drop()
+
+    async def server_info(self, **kwargs: Any) -> Any:
+        """Get server information."""
+        return await self._native["admin"].command("buildInfo")
+
+    # Unsupported operations
     async def list_databases(self, **kwargs: Any) -> Any:
         raise NotImplementedError("list_databases not yet supported")
 
     async def list_database_names(self, **kwargs: Any) -> Any:
         raise NotImplementedError("list_database_names not yet supported")
-
-    async def drop_database(self, name: str, **kwargs: Any) -> None:
-        raise NotImplementedError("drop_database not yet supported")
-
-    async def server_info(self, **kwargs: Any) -> Any:
-        raise NotImplementedError("server_info not yet supported")
 
     @property
     def address(self) -> Any:

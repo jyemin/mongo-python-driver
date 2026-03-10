@@ -15,10 +15,13 @@
 """Minimal MongoClient that delegates to native FFI."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from bson.codec_options import CodecOptions, DEFAULT_CODEC_OPTIONS
 from pymongo.synchronous.database import Database
+
+if TYPE_CHECKING:
+    from pymongo.synchronous.client_session import ClientSession
 
 
 class MongoClient:
@@ -89,9 +92,34 @@ class MongoClient:
     def codec_options(self) -> CodecOptions:
         return self._codec_options
 
+    def start_session(self, **kwargs: Any) -> "ClientSession":
+        """Start a client session."""
+        from pymongo.synchronous.client_session import ClientSession, SessionOptions
+
+        # Convert TransactionOptions to dict for FFI
+        default_txn_opts = kwargs.get("default_transaction_options")
+        txn_opts_dict = None
+        if default_txn_opts:
+            txn_opts_dict = {
+                "read_concern": getattr(default_txn_opts, "read_concern", None),
+                "write_concern": getattr(default_txn_opts, "write_concern", None),
+                "read_preference": getattr(default_txn_opts, "read_preference", None),
+                "max_commit_time_ms": getattr(default_txn_opts, "max_commit_time_ms", None),
+            }
+
+        native_session = self._native.start_session(
+            causal_consistency=kwargs.get("causal_consistency", True),
+            snapshot=kwargs.get("snapshot", False),
+            default_transaction_options=txn_opts_dict,
+        )
+        options = SessionOptions(
+            causal_consistency=kwargs.get("causal_consistency"),
+            default_transaction_options=default_txn_opts,
+            snapshot=kwargs.get("snapshot"),
+        )
+        return ClientSession(self, native_session, options)
+
     # Unsupported operations
-    def start_session(self, **kwargs: Any) -> Any:
-        raise NotImplementedError("start_session not yet supported")
 
     def list_databases(self, **kwargs: Any) -> Any:
         raise NotImplementedError("list_databases not yet supported")

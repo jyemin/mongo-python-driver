@@ -221,17 +221,27 @@ class NativeSyncMongoClient:
         """
         return NativeSyncDatabase(self, name, codec_options or self._codec_options)
 
-    def start_session(self, causal_consistency: bool = True, snapshot: bool = False) -> "NativeSyncSession":
+    def start_session(
+        self,
+        causal_consistency: bool = True,
+        snapshot: bool = False,
+        default_transaction_options: Optional[Dict[str, Any]] = None,
+    ) -> "NativeSyncSession":
         """Start a new client session.
 
         Args:
             causal_consistency: Enable causal consistency.
             snapshot: Enable snapshot reads.
+            default_transaction_options: Default options for transactions.
 
         Returns:
             A session object that can be used with operations.
         """
-        handle = self._native.session_start(causal_consistency=causal_consistency, snapshot=snapshot)
+        handle = self._native.session_start(
+            causal_consistency=causal_consistency,
+            snapshot=snapshot,
+            default_transaction_options=default_transaction_options,
+        )
         return NativeSyncSession(self, handle)
 
 
@@ -692,14 +702,20 @@ class NativeSyncSession:
             self._client._native.session_end(self._handle)
             self._ended = True
 
-    def start_transaction(self) -> None:
+    def start_transaction(self, options: Optional[Dict[str, Any]] = None) -> None:
         """Start a new transaction.
+
+        Args:
+            options: Transaction options dict with read_concern, write_concern,
+                     read_preference, max_commit_time_ms.
 
         Raises:
             OperationFailure: If transactions are not supported (e.g., standalone server).
         """
         bridge = SyncCallbackBridge(lambda r: None)
-        self._client._native.session_start_transaction(self._handle, _txn_cb, bridge.handle)
+        self._client._native.session_start_transaction(
+            self._handle, _txn_cb, bridge.handle, options=options
+        )
         bridge.wait()
 
     def commit_transaction(self) -> None:
