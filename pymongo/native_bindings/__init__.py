@@ -36,6 +36,7 @@ from pymongo.native_bindings.sync_client import (
     NativeSyncDatabase,
     NativeSyncCollection,
     NativeSyncCursor,
+    NativeSyncSession,
     UnsupportedOperationError,
 )
 from pymongo.native_bindings.async_client import (
@@ -43,6 +44,7 @@ from pymongo.native_bindings.async_client import (
     NativeAsyncDatabase,
     NativeAsyncCollection,
     NativeAsyncCursor,
+    NativeAsyncSession,
 )
 
 __all__ = [
@@ -51,10 +53,12 @@ __all__ = [
     "NativeSyncDatabase",
     "NativeSyncCollection",
     "NativeSyncCursor",
+    "NativeSyncSession",
     "NativeAsyncMongoClient",
     "NativeAsyncDatabase",
     "NativeAsyncCollection",
     "NativeAsyncCursor",
+    "NativeAsyncSession",
     "UnsupportedOperationError",
     # Low-level API
     "is_available",

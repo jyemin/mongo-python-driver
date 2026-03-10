@@ -90,7 +90,9 @@ def convert_error(error_ptr) -> PyMongoError:
         message = _ffi_string(err.message) or "Server error"
         code = err.code
         labels = _extract_labels(err.labels, err.labels_len)
-        return OperationFailure(message, code=code, details=None, error_labels=labels)
+        # OperationFailure expects error_labels in details dict
+        details = {"errorLabels": labels} if labels else None
+        return OperationFailure(message, code=code, details=details)
     
     elif error_type == _ERROR_TYPE_IO:
         err = error_union.io
@@ -121,7 +123,8 @@ def convert_error(error_ptr) -> PyMongoError:
         err = error_union.transaction
         message = _ffi_string(err.message) or "Transaction error"
         labels = _extract_labels(err.labels, err.labels_len)
-        return OperationFailure(message, error_labels=labels)
+        details = {"errorLabels": labels} if labels else None
+        return OperationFailure(message, details=details)
     
     elif error_type == _ERROR_TYPE_INCOMPATIBLE_SERVER:
         err = error_union.incompatible_server

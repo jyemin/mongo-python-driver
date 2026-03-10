@@ -82,6 +82,11 @@ class NativeAsyncMongoClient:
     def get_database(self, name: str, codec_options: Optional[CodecOptions] = None) -> "NativeAsyncDatabase":
         return NativeAsyncDatabase(self, name, codec_options or self._codec_options)
 
+    def start_session(self, causal_consistency: bool = True, snapshot: bool = False) -> "NativeAsyncSession":
+        """Start a new client session."""
+        handle = self._native.session_start(causal_consistency=causal_consistency, snapshot=snapshot)
+        return NativeAsyncSession(self, handle)
+
 
 class NativeAsyncDatabase:
     """Native asynchronous database handle."""
@@ -140,22 +145,25 @@ class NativeAsyncCollection:
     def full_name(self) -> str:
         return f"{self._database.name}.{self._name}"
     
-    async def insert_one(self, document: Mapping[str, Any], bypass_document_validation: bool = False, **kwargs) -> InsertOneResult:
+    async def insert_one(self, document: Mapping[str, Any], bypass_document_validation: bool = False,
+                         session: Optional["NativeAsyncSession"] = None, **kwargs) -> InsertOneResult:
         """Insert a single document."""
         doc = dict(document)
         if "_id" not in doc:
             doc["_id"] = ObjectId()
         doc_bytes = bson.encode(doc, codec_options=self._codec_options)
+        session_handle = session._handle if session else None
         bridge = AsyncCallbackBridge(lambda r: _convert_insert_one(r, self._codec_options))
         self._database._client._native.insert_one(
             self._database.name, self._name, doc_bytes, _insert_one_cb, bridge.handle,
-            bypass_document_validation=bypass_document_validation,
+            bypass_document_validation=bypass_document_validation, session=session_handle,
         )
         inserted_id = await bridge.future
         return InsertOneResult(inserted_id or doc["_id"], acknowledged=True)
 
     async def insert_many(self, documents: Sequence[Mapping[str, Any]], ordered: bool = True,
-                          bypass_document_validation: bool = False, **kwargs) -> InsertManyResult:
+                          bypass_document_validation: bool = False,
+                          session: Optional["NativeAsyncSession"] = None, **kwargs) -> InsertManyResult:
         """Insert multiple documents."""
         docs_with_ids = []
         doc_bytes_list = []
@@ -166,37 +174,43 @@ class NativeAsyncCollection:
             docs_with_ids.append(d)
             doc_bytes_list.append(bson.encode(d, codec_options=self._codec_options))
 
+        session_handle = session._handle if session else None
         bridge = AsyncCallbackBridge(lambda r: _convert_insert_many(r, self._codec_options))
         self._database._client._native.insert_many(
             self._database.name, self._name, doc_bytes_list, _insert_many_cb, bridge.handle, bridge._refs,
-            ordered=ordered, bypass_document_validation=bypass_document_validation,
+            ordered=ordered, bypass_document_validation=bypass_document_validation, session=session_handle,
         )
         ids_dict = await bridge.future
         inserted_ids = [ids_dict.get(i, docs_with_ids[i]["_id"]) for i in range(len(docs_with_ids))]
         return InsertManyResult(inserted_ids, acknowledged=True)
 
-    async def find_one(self, filter: Optional[Mapping[str, Any]] = None, **kwargs) -> Optional[Dict[str, Any]]:
+    async def find_one(self, filter: Optional[Mapping[str, Any]] = None,
+                       session: Optional["NativeAsyncSession"] = None, **kwargs) -> Optional[Dict[str, Any]]:
         """Find a single document."""
-        async for doc in self.find(filter, limit=1, **kwargs):
+        async for doc in self.find(filter, limit=1, session=session, **kwargs):
             return doc
         return None
 
     def find(self, filter: Optional[Mapping[str, Any]] = None, projection: Optional[Mapping[str, Any]] = None,
-             skip: int = 0, limit: int = 0, sort: Optional[List] = None, **kwargs) -> "NativeAsyncCursor":
+             skip: int = 0, limit: int = 0, sort: Optional[List] = None, batch_size: int = -1,
+             session: Optional["NativeAsyncSession"] = None, **kwargs) -> "NativeAsyncCursor":
         """Find documents matching a filter."""
         filter_bytes = bson.encode(filter or {}, codec_options=self._codec_options)
         proj_bytes = bson.encode(projection, codec_options=self._codec_options) if projection else None
         sort_bytes = bson.encode(dict(sort) if isinstance(sort, list) else sort, codec_options=self._codec_options) if sort else None
+        session_handle = session._handle if session else None
 
         return NativeAsyncCursor(
             self._database._client._native, self._database.name, self._name,
-            filter_bytes, proj_bytes, sort_bytes, skip, limit, self._codec_options,
+            filter_bytes, proj_bytes, sort_bytes, skip, limit, batch_size, self._codec_options, session_handle,
         )
 
-    async def drop(self) -> None:
+    async def drop(self, session: Optional["NativeAsyncSession"] = None) -> None:
         """Drop this collection."""
+        session_handle = session._handle if session else None
         bridge = AsyncCallbackBridge(lambda r: None)
-        self._database._client._native.drop_collection(self._database.name, self._name, _void_cb, bridge.handle)
+        self._database._client._native.drop_collection(self._database.name, self._name, _void_cb, bridge.handle,
+                                                        session=session_handle)
         await bridge.future
 
     # Unsupported operations
@@ -221,7 +235,7 @@ class NativeAsyncCursor:
 
     def __init__(self, native_client: NativeClient, db_name: str, coll_name: str,
                  filter_bytes: bytes, proj_bytes: Optional[bytes], sort_bytes: Optional[bytes],
-                 skip: int, limit: int, codec_options: CodecOptions):
+                 skip: int, limit: int, batch_size: int, codec_options: CodecOptions, session_handle=None):
         self._native = native_client
         self._db_name = db_name
         self._coll_name = coll_name
@@ -230,7 +244,9 @@ class NativeAsyncCursor:
         self._sort_bytes = sort_bytes
         self._skip = skip
         self._limit = limit
+        self._batch_size = batch_size
         self._codec_options = codec_options
+        self._session = session_handle
         self._cursor = None
         self._exhausted = False
         self._buffer: List[Dict[str, Any]] = []
@@ -247,6 +263,7 @@ class NativeAsyncCursor:
         self._native.find(
             self._db_name, self._coll_name, self._filter_bytes, _find_cb, bridge.handle,
             projection=self._proj_bytes, sort=self._sort_bytes, skip=self._skip, limit=self._limit,
+            batch_size=self._batch_size, session=self._session,
         )
         self._cursor, self._exhausted, first_batch = await bridge.future
         self._buffer.extend(first_batch)
@@ -286,7 +303,7 @@ class NativeAsyncCursor:
             return exhausted, docs
 
         bridge = AsyncCallbackBridge(convert)
-        self._native.cursor_get_more(self._cursor, _get_more_cb, bridge.handle)
+        self._native.cursor_get_more(self._cursor, _get_more_cb, bridge.handle, session=self._session)
         self._exhausted, new_docs = await bridge.future
         self._buffer.extend(new_docs)
 
@@ -300,3 +317,52 @@ class NativeAsyncCursor:
         """Return all remaining documents as a list."""
         return [doc async for doc in self]
 
+
+# =============================================================================
+# NativeAsyncSession
+# =============================================================================
+
+class NativeAsyncSession:
+    """Native asynchronous client session for transactions."""
+
+    def __init__(self, client: NativeAsyncMongoClient, handle):
+        self._client = client
+        self._handle = handle
+        self._ended = False
+
+    async def __aenter__(self) -> "NativeAsyncSession":
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.end_session()
+
+    @property
+    def session_id(self):
+        return self._handle
+
+    def end_session(self) -> None:
+        """End the session."""
+        if not self._ended and self._handle is not None:
+            self._client._native.session_end(self._handle)
+            self._ended = True
+
+    async def start_transaction(self) -> None:
+        """Start a new transaction."""
+        from pymongo.native_bindings.sync_client import _txn_cb
+        bridge = AsyncCallbackBridge(lambda r: None)
+        self._client._native.session_start_transaction(self._handle, _txn_cb, bridge.handle)
+        await bridge.future
+
+    async def commit_transaction(self) -> None:
+        """Commit the current transaction."""
+        from pymongo.native_bindings.sync_client import _txn_cb
+        bridge = AsyncCallbackBridge(lambda r: None)
+        self._client._native.session_commit_transaction(self._handle, _txn_cb, bridge.handle)
+        await bridge.future
+
+    async def abort_transaction(self) -> None:
+        """Abort the current transaction."""
+        from pymongo.native_bindings.sync_client import _txn_cb
+        bridge = AsyncCallbackBridge(lambda r: None)
+        self._client._native.session_abort_transaction(self._handle, _txn_cb, bridge.handle)
+        await bridge.future

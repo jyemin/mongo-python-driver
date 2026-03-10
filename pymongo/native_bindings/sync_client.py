@@ -205,6 +205,19 @@ class NativeSyncMongoClient:
         """
         return NativeSyncDatabase(self, name, codec_options or self._codec_options)
 
+    def start_session(self, causal_consistency: bool = True, snapshot: bool = False) -> "NativeSyncSession":
+        """Start a new client session.
+
+        Args:
+            causal_consistency: Enable causal consistency.
+            snapshot: Enable snapshot reads.
+
+        Returns:
+            A session object that can be used with operations.
+        """
+        handle = self._native.session_start(causal_consistency=causal_consistency, snapshot=snapshot)
+        return NativeSyncSession(self, handle)
+
 
 # =============================================================================
 # NativeSyncDatabase
@@ -300,6 +313,7 @@ class NativeSyncCollection:
         self,
         document: Mapping[str, Any],
         bypass_document_validation: bool = False,
+        session: Optional["NativeSyncSession"] = None,
         **kwargs: Any,
     ) -> InsertOneResult:
         """Insert a single document.
@@ -307,6 +321,7 @@ class NativeSyncCollection:
         Args:
             document: The document to insert.
             bypass_document_validation: If True, skip document validation.
+            session: Optional client session for transaction support.
 
         Returns:
             InsertOneResult with inserted_id.
@@ -317,6 +332,7 @@ class NativeSyncCollection:
             doc["_id"] = ObjectId()
 
         doc_bytes = bson.encode(doc, codec_options=self._codec_options)
+        session_handle = session._handle if session else None
 
         bridge = SyncCallbackBridge(lambda r: _convert_insert_one(r, self._codec_options))
         self._database._client._native.insert_one(
@@ -326,6 +342,7 @@ class NativeSyncCollection:
             _insert_one_cb,
             bridge.handle,
             bypass_document_validation=bypass_document_validation,
+            session=session_handle,
         )
         inserted_id = bridge.wait()
         return InsertOneResult(inserted_id or doc["_id"], acknowledged=True)
@@ -335,6 +352,7 @@ class NativeSyncCollection:
         documents: Sequence[Mapping[str, Any]],
         ordered: bool = True,
         bypass_document_validation: bool = False,
+        session: Optional["NativeSyncSession"] = None,
         **kwargs: Any,
     ) -> InsertManyResult:
         """Insert multiple documents.
@@ -343,6 +361,7 @@ class NativeSyncCollection:
             documents: Sequence of documents to insert.
             ordered: If True, stop on first error.
             bypass_document_validation: If True, skip document validation.
+            session: Optional client session for transaction support.
 
         Returns:
             InsertManyResult with inserted_ids.
@@ -357,6 +376,8 @@ class NativeSyncCollection:
             docs_with_ids.append(d)
             doc_bytes_list.append(bson.encode(d, codec_options=self._codec_options))
 
+        session_handle = session._handle if session else None
+
         bridge = SyncCallbackBridge(lambda r: _convert_insert_many(r, self._codec_options))
         self._database._client._native.insert_many(
             self._database.name,
@@ -367,6 +388,7 @@ class NativeSyncCollection:
             bridge._refs,  # keepalive
             ordered=ordered,
             bypass_document_validation=bypass_document_validation,
+            session=session_handle,
         )
         ids_dict = bridge.wait()
         # Return _ids in order
@@ -380,18 +402,20 @@ class NativeSyncCollection:
     def find_one(
         self,
         filter: Optional[Mapping[str, Any]] = None,
+        session: Optional["NativeSyncSession"] = None,
         **kwargs: Any,
     ) -> Optional[Dict[str, Any]]:
         """Find a single document.
 
         Args:
             filter: Query filter.
+            session: Optional client session for transaction support.
             **kwargs: Additional options (projection, sort, etc.)
 
         Returns:
             The document, or None if not found.
         """
-        for doc in self.find(filter, limit=1, **kwargs):
+        for doc in self.find(filter, limit=1, session=session, **kwargs):
             return doc
         return None
 
@@ -402,6 +426,8 @@ class NativeSyncCollection:
         skip: int = 0,
         limit: int = 0,
         sort: Optional[List] = None,
+        batch_size: int = -1,
+        session: Optional["NativeSyncSession"] = None,
         **kwargs: Any,
     ) -> "NativeSyncCursor":
         """Find documents matching a filter.
@@ -412,6 +438,8 @@ class NativeSyncCollection:
             skip: Number of documents to skip.
             limit: Maximum documents to return.
             sort: Sort specification.
+            batch_size: Number of documents per batch.
+            session: Optional client session for transaction support.
 
         Returns:
             Cursor to iterate over results.
@@ -429,6 +457,8 @@ class NativeSyncCollection:
             sort_doc = dict(sort) if isinstance(sort, list) else sort
             sort_bytes = bson.encode(sort_doc, codec_options=self._codec_options)
 
+        session_handle = session._handle if session else None
+
         bridge = SyncCallbackBridge(lambda r: _convert_find(r, self._codec_options))
         self._database._client._native.find(
             self._database.name,
@@ -440,6 +470,8 @@ class NativeSyncCollection:
             sort=sort_bytes,
             skip=skip,
             limit=limit,
+            batch_size=batch_size,
+            session=session_handle,
         )
         cursor_handle, exhausted, first_batch = bridge.wait()
         return NativeSyncCursor(
@@ -448,17 +480,23 @@ class NativeSyncCollection:
             exhausted,
             first_batch,
             self._codec_options,
+            session_handle,
         )
 
     # -------------------------------------------------------------------------
     # Drop
     # -------------------------------------------------------------------------
 
-    def drop(self) -> None:
-        """Drop this collection."""
+    def drop(self, session: Optional["NativeSyncSession"] = None) -> None:
+        """Drop this collection.
+
+        Args:
+            session: Optional client session for transaction support.
+        """
+        session_handle = session._handle if session else None
         bridge = SyncCallbackBridge(lambda r: None)
         self._database._client._native.drop_collection(
-            self._database.name, self._name, _void_cb, bridge.handle
+            self._database.name, self._name, _void_cb, bridge.handle, session=session_handle
         )
         bridge.wait()
 
@@ -508,12 +546,14 @@ class NativeSyncCursor:
         exhausted: bool,
         first_batch: List[Dict[str, Any]],
         codec_options: CodecOptions,
+        session_handle=None,
     ):
         self._native = native_client
         self._cursor = cursor_handle
         self._exhausted = exhausted
         self._buffer = list(first_batch)
         self._codec_options = codec_options
+        self._session = session_handle
         self._closed = False
 
     def __iter__(self) -> "NativeSyncCursor":
@@ -549,7 +589,7 @@ class NativeSyncCursor:
             return exhausted, docs
 
         bridge = SyncCallbackBridge(convert)
-        self._native.cursor_get_more(self._cursor, _get_more_cb, bridge.handle)
+        self._native.cursor_get_more(self._cursor, _get_more_cb, bridge.handle, session=self._session)
         self._exhausted, new_docs = bridge.wait()
         self._buffer.extend(new_docs)
 
@@ -569,3 +609,60 @@ class NativeSyncCursor:
         """Return all remaining documents as a list."""
         return list(self)
 
+
+# =============================================================================
+# NativeSyncSession
+# =============================================================================
+
+@ffi.callback('void(void*, const Error*)')
+def _txn_cb(userdata, error_ptr):
+    bridge = ffi.from_handle(userdata)
+    bridge.on_complete(None, error_ptr)
+
+
+class NativeSyncSession:
+    """Native synchronous client session for transactions."""
+
+    def __init__(self, client: NativeSyncMongoClient, handle):
+        self._client = client
+        self._handle = handle
+        self._ended = False
+
+    def __enter__(self) -> "NativeSyncSession":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.end_session()
+
+    @property
+    def session_id(self):
+        """The session ID."""
+        return self._handle
+
+    def end_session(self) -> None:
+        """End the session."""
+        if not self._ended and self._handle is not None:
+            self._client._native.session_end(self._handle)
+            self._ended = True
+
+    def start_transaction(self) -> None:
+        """Start a new transaction.
+
+        Raises:
+            OperationFailure: If transactions are not supported (e.g., standalone server).
+        """
+        bridge = SyncCallbackBridge(lambda r: None)
+        self._client._native.session_start_transaction(self._handle, _txn_cb, bridge.handle)
+        bridge.wait()
+
+    def commit_transaction(self) -> None:
+        """Commit the current transaction."""
+        bridge = SyncCallbackBridge(lambda r: None)
+        self._client._native.session_commit_transaction(self._handle, _txn_cb, bridge.handle)
+        bridge.wait()
+
+    def abort_transaction(self) -> None:
+        """Abort the current transaction."""
+        bridge = SyncCallbackBridge(lambda r: None)
+        self._client._native.session_abort_transaction(self._handle, _txn_cb, bridge.handle)
+        bridge.wait()
