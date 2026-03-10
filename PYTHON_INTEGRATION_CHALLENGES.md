@@ -216,31 +216,7 @@ by the native library.
 
 ## Performance Results
 
-Benchmarks run with PyMongo's driver benchmark suite:
-
-```
-Benchmark              PyMongo   Native    Rust     vs PyMongo
----------------------  --------  -------   ------   ----------
-Run command               0.17     0.17     0.20        0% ≈
-Find one                 13.59    13.45    20.18       -1% ≈
-Small doc insertOne       2.63     2.69     4.02       +2% ≈
-Large doc insertOne        375      390      569       +4% ≈
-Find many (cursor)         224      225      229        0% ≈
-Small doc bulk insert      113      114      175        0% ≈
-Large doc bulk insert      341      344      520        0% ≈
-```
-
-**Performance observations**:
-
-1. **C extensions for batch operations**: Initial implementation showed slower bulk insert and cursor iteration. The per-document Python function call overhead was the bottleneck, not FFI. Moving encoding/decoding loops into C resolved this.
-
-2. **Reuse existing C infrastructure**: PyMongo's `_cbson` has optimized `write_dict` and `elements_to_dict` functions. Extending the C API to expose these was more effective than reimplementing.
-
-3. **Avoid Python loops for batches**: Pass FFI pointer arrays directly to C extensions rather than iterating in Python.
-
-4. **Cursor buffer**: Use list with index and null-out pattern instead of deque. Avoids copying the decoded list while still allowing GC of processed documents.
-
-5. **Cache cffi types**: `ffi.cast("uintptr_t", ptr)` parses the type string each time. Caching with `ffi.typeof()` avoids pycparser overhead.
+See [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) for current benchmark comparison.
 
 ## Open Questions
 
