@@ -198,11 +198,14 @@ class NativeClient:
 
         bypass = 1 if bypass_document_validation else -1
 
+        db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
+        coll_bytes = ffi.new("char[]", coll_name.encode("utf-8"))
+
         self._lib.mongo_insert_one(
             self._client,
             ctx,
-            db_name.encode("utf-8"),
-            coll_name.encode("utf-8"),
+            db_bytes,
+            coll_bytes,
             bson_struct,
             bypass,
             ffi.NULL,  # comment
@@ -286,11 +289,14 @@ class NativeClient:
             sort_struct.len = len(sort)
             opts.sort = sort_struct
 
+        db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
+        coll_bytes = ffi.new("char[]", coll_name.encode("utf-8"))
+
         self._lib.mongo_find(
             self._client,
             ctx,
-            db_name.encode("utf-8"),
-            coll_name.encode("utf-8"),
+            db_bytes,
+            coll_bytes,
             filter_struct,
             opts,
             callback,
@@ -326,11 +332,284 @@ class NativeClient:
         ctx.read_concern = ffi.NULL
         ctx.timeout_ms = -1
 
+        db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
+
         self._lib.mongo_run_command(
             self._client,
             ctx,
-            db_name.encode("utf-8"),
+            db_bytes,
             cmd_struct,
+            callback,
+            userdata,
+        )
+
+    def insert_many(
+        self,
+        db_name: str,
+        coll_name: str,
+        documents: list,
+        callback: Callable,
+        userdata: Any,
+        keepalive: list,
+        *,
+        bypass_document_validation: bool = False,
+        ordered: bool = True,
+        session=None,
+    ) -> None:
+        """Insert multiple documents (async via callback).
+
+        Args:
+            db_name: Database name.
+            coll_name: Collection name.
+            documents: List of BSON-encoded document bytes.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+            keepalive: List to append FFI objects that must stay alive until callback.
+            bypass_document_validation: Skip document validation.
+            ordered: If True, stop on first error.
+            session: Optional client session handle.
+        """
+        # Build array of document pointers
+        # Each document is already BSON bytes, we need pointers to each
+        buffers = [ffi.from_buffer(doc) for doc in documents]
+        ptr_array = ffi.new("uint8_t*[]", buffers)
+
+        # BsonArray is passed by value, so create the struct directly
+        docs_struct = ffi.new("BsonArray *")
+        docs_struct.data = ptr_array
+        docs_struct.len = len(documents)
+
+        ctx = ffi.new("OperationContext *")
+        ctx.session = session if session else ffi.NULL
+        ctx.read_preference = ffi.NULL
+        ctx.write_concern = ffi.NULL
+        ctx.read_concern = ffi.NULL
+        ctx.timeout_ms = -1
+
+        bypass = 1 if bypass_document_validation else -1
+
+        db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
+        coll_bytes = ffi.new("char[]", coll_name.encode("utf-8"))
+
+        # Keep FFI objects alive - caller must keep this list until callback
+        keepalive.extend([documents, buffers, ptr_array, docs_struct, ctx, db_bytes, coll_bytes])
+
+        self._lib.mongo_insert_many(
+            self._client,
+            ctx,
+            db_bytes,
+            coll_bytes,
+            docs_struct[0],  # Pass by value (dereference)
+            bypass,
+            ordered,
+            ffi.NULL,  # comment
+            callback,
+            userdata,
+        )
+
+    def drop_collection(
+        self,
+        db_name: str,
+        coll_name: str,
+        callback: Callable,
+        userdata: Any,
+        *,
+        session=None,
+    ) -> None:
+        """Drop a collection (async via callback).
+
+        Args:
+            db_name: Database name.
+            coll_name: Collection name.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+            session: Optional client session handle.
+        """
+        ctx = ffi.new("OperationContext *")
+        ctx.session = session if session else ffi.NULL
+        ctx.read_preference = ffi.NULL
+        ctx.write_concern = ffi.NULL
+        ctx.read_concern = ffi.NULL
+        ctx.timeout_ms = -1
+
+        db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
+        coll_bytes = ffi.new("char[]", coll_name.encode("utf-8"))
+
+        self._lib.mongo_drop_collection(
+            self._client,
+            ctx,
+            db_bytes,
+            coll_bytes,
+            callback,
+            userdata,
+        )
+
+    def drop_database(
+        self,
+        db_name: str,
+        callback: Callable,
+        userdata: Any,
+        *,
+        session=None,
+    ) -> None:
+        """Drop a database (async via callback).
+
+        Args:
+            db_name: Database name.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+            session: Optional client session handle.
+        """
+        ctx = ffi.new("OperationContext *")
+        ctx.session = session if session else ffi.NULL
+        ctx.read_preference = ffi.NULL
+        ctx.write_concern = ffi.NULL
+        ctx.read_concern = ffi.NULL
+        ctx.timeout_ms = -1
+
+        db_bytes = ffi.new("char[]", db_name.encode("utf-8"))
+
+        self._lib.mongo_drop_database(
+            self._client,
+            ctx,
+            db_bytes,
+            callback,
+            userdata,
+        )
+
+    def cursor_get_more(
+        self,
+        cursor,
+        callback: Callable,
+        userdata: Any,
+        *,
+        session=None,
+    ) -> None:
+        """Get more results from a cursor (async via callback).
+
+        Args:
+            cursor: Cursor handle from a find operation.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+            session: Optional client session handle.
+        """
+        self._lib.mongo_cursor_get_more(
+            self._client,
+            cursor,
+            session if session else ffi.NULL,
+            userdata,
+            callback,
+        )
+
+    def cursor_close(self, cursor) -> None:
+        """Close a cursor and release resources.
+
+        Args:
+            cursor: Cursor handle from a find operation.
+        """
+        if cursor != ffi.NULL:
+            self._lib.mongo_cursor_close(cursor)
+
+    # -------------------------------------------------------------------------
+    # Session Operations
+    # -------------------------------------------------------------------------
+
+    def session_start(self, *, causal_consistency: bool = True, snapshot: bool = False):
+        """Start a new client session.
+
+        Args:
+            causal_consistency: Enable causal consistency.
+            snapshot: Enable snapshot reads.
+
+        Returns:
+            Session handle to pass to operations.
+
+        Raises:
+            PyMongoError: If session creation fails.
+        """
+        opts = ffi.new("SessionOptions *")
+        opts.causal_consistency = 1 if causal_consistency else 0
+        opts.snapshot = 1 if snapshot else 0
+        opts.default_transaction_options = ffi.NULL
+
+        error_out = ffi.new("Error **")
+        session = self._lib.mongo_session_start(self._client, opts, error_out)
+
+        if session == ffi.NULL:
+            if error_out[0] != ffi.NULL:
+                exc = convert_error(error_out[0])
+                self._lib.error_free(error_out[0])
+                raise exc
+            raise RuntimeError("Failed to start session")
+
+        return session
+
+    def session_end(self, session) -> None:
+        """End a client session.
+
+        Args:
+            session: Session handle from session_start.
+        """
+        if session != ffi.NULL:
+            self._lib.mongo_session_end(session)
+
+    def session_start_transaction(
+        self,
+        session,
+        callback: Callable,
+        userdata: Any,
+    ) -> None:
+        """Start a transaction on a session (async via callback).
+
+        Args:
+            session: Session handle.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+        """
+        self._lib.mongo_session_start_transaction(
+            self._client,
+            session,
+            ffi.NULL,  # options - use defaults
+            callback,
+            userdata,
+        )
+
+    def session_commit_transaction(
+        self,
+        session,
+        callback: Callable,
+        userdata: Any,
+    ) -> None:
+        """Commit a transaction (async via callback).
+
+        Args:
+            session: Session handle.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+        """
+        self._lib.mongo_session_commit_transaction(
+            self._client,
+            session,
+            callback,
+            userdata,
+        )
+
+    def session_abort_transaction(
+        self,
+        session,
+        callback: Callable,
+        userdata: Any,
+    ) -> None:
+        """Abort a transaction (async via callback).
+
+        Args:
+            session: Session handle.
+            callback: FFI callback function.
+            userdata: FFI handle to pass to callback.
+        """
+        self._lib.mongo_session_abort_transaction(
+            self._client,
+            session,
             callback,
             userdata,
         )

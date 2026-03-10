@@ -33,16 +33,16 @@ T = TypeVar("T")
 
 class AsyncCallbackBridge(Generic[T]):
     """Bridge that converts FFI callbacks to asyncio Futures.
-    
+
     Usage:
         bridge = AsyncCallbackBridge(result_converter)
         native_lib.some_operation(..., bridge.callback, bridge.handle)
         result = await bridge.future
     """
-    
+
     def __init__(self, result_converter: Callable[[Any], T]):
         """Initialize the bridge.
-        
+
         Args:
             result_converter: Function to convert the FFI result to Python type.
         """
@@ -51,6 +51,20 @@ class AsyncCallbackBridge(Generic[T]):
         self._result_converter = result_converter
         # Must keep a strong reference to prevent GC
         self._handle = ffi.new_handle(self)
+        # Store references to FFI data that must stay alive until callback
+        self._refs: list = []
+
+    def keep_alive(self, *refs) -> "AsyncCallbackBridge[T]":
+        """Keep references alive until the callback fires.
+
+        Args:
+            refs: Objects to keep alive (FFI buffers, structs, etc.)
+
+        Returns:
+            self for chaining
+        """
+        self._refs.extend(refs)
+        return self
     
     @property
     def handle(self):
@@ -92,16 +106,16 @@ class AsyncCallbackBridge(Generic[T]):
 
 class SyncCallbackBridge(Generic[T]):
     """Bridge that converts FFI callbacks to blocking waits.
-    
+
     Usage:
         bridge = SyncCallbackBridge(result_converter)
         native_lib.some_operation(..., bridge.callback, bridge.handle)
         result = bridge.wait()
     """
-    
+
     def __init__(self, result_converter: Callable[[Any], T]):
         """Initialize the bridge.
-        
+
         Args:
             result_converter: Function to convert the FFI result to Python type.
         """
@@ -111,6 +125,20 @@ class SyncCallbackBridge(Generic[T]):
         self._result_converter = result_converter
         # Must keep a strong reference to prevent GC
         self._handle = ffi.new_handle(self)
+        # Store references to FFI data that must stay alive until callback
+        self._refs: list = []
+
+    def keep_alive(self, *refs) -> "SyncCallbackBridge[T]":
+        """Keep references alive until the callback fires.
+
+        Args:
+            refs: Objects to keep alive (FFI buffers, structs, etc.)
+
+        Returns:
+            self for chaining
+        """
+        self._refs.extend(refs)
+        return self
     
     @property
     def handle(self):
