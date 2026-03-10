@@ -48,9 +48,13 @@ from pymongo.native_bindings.sync_client import (
 
 class NativeAsyncMongoClient:
     """Native asynchronous MongoDB client using FFI bindings."""
-    
+
     def __init__(self, host: str = "localhost", port: int = 27017, **kwargs: Any):
-        hosts = host if "://" in host else f"{host}:{port}"
+        # If host already has port or is a connection string, use as-is
+        if "://" in host or ":" in host:
+            hosts = host
+        else:
+            hosts = f"{host}:{port}"
         self._native = NativeClient(
             hosts,
             app_name=kwargs.get("appName") or kwargs.get("appname"),

@@ -160,11 +160,15 @@ class NativeSyncMongoClient:
         """Create a new native sync MongoDB client.
 
         Args:
-            host: MongoDB host or connection string.
-            port: MongoDB port (ignored if host is a connection string).
+            host: MongoDB host, host:port, or connection string.
+            port: MongoDB port (ignored if host contains ":" or "://").
             **kwargs: Connection options (appName, directConnection, tls, etc.)
         """
-        hosts = host if "://" in host else f"{host}:{port}"
+        # If host already has port or is a connection string, use as-is
+        if "://" in host or ":" in host:
+            hosts = host
+        else:
+            hosts = f"{host}:{port}"
 
         self._native = NativeClient(
             hosts,
