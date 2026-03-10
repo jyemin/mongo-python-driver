@@ -390,11 +390,20 @@ class NativeSyncCollection:
                 doc["_id"] = ObjectId()
             id_list.append(doc["_id"])
 
-        # Encode to BSON - use old method for now
+        # Encode to BSON using contiguous buffer
         if _USE_C_NATIVE:
-            doc_bytes_list = _encode_docs(documents, self._codec_options)
+            buffer, pointer_list = _encode_docs_contiguous(documents, self._codec_options)
         else:
             doc_bytes_list = [bson.encode(d, codec_options=self._codec_options) for d in documents]
+            buffer = b''.join(doc_bytes_list)
+            pointer_list = []
+            offset = 0
+            base = id(buffer)  # This won't work - need ctypes
+            import ctypes
+            base_ptr = ctypes.cast(ctypes.c_char_p(buffer), ctypes.c_void_p).value
+            for doc_bytes in doc_bytes_list:
+                pointer_list.append(base_ptr + offset)
+                offset += len(doc_bytes)
 
         session_handle = session._handle if session else None
 
@@ -402,7 +411,8 @@ class NativeSyncCollection:
         self._database._client._native.insert_many(
             self._database.name,
             self._name,
-            doc_bytes_list,
+            buffer,
+            pointer_list,
             _insert_many_cb,
             bridge.handle,
             bridge._refs,  # keepalive
