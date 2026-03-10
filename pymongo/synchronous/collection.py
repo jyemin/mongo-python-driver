@@ -267,6 +267,11 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
             else:
                 raise ValueError("Collection does not support the `create` or `kwargs` arguments.")
 
+    def _raise_unsupported(self, method_name: str) -> None:
+        """Raise UnsupportedOperationError for methods not yet supported in native FFI."""
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError(f"{method_name} not yet supported in native FFI")
+
     def __getattr__(self, name: str) -> Collection[_DocumentType]:
         """Get a sub-collection of this collection by name.
 
@@ -553,24 +558,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
         .. _change streams specification:
             https://github.com/mongodb/specifications/blob/master/source/change-streams/change-streams.md
         """
-        change_stream = CollectionChangeStream(
-            self,
-            pipeline,
-            full_document,
-            resume_after,
-            max_await_time_ms,
-            batch_size,
-            collation,
-            start_at_operation_time,
-            session,
-            start_after,
-            comment,
-            full_document_before_change,
-            show_expanded_events,
-        )
-
-        change_stream._initialize_cursor()
-        return change_stream
+        self._raise_unsupported("watch")
 
     def _conn_for_writes(
         self, session: Optional[ClientSession], operation: str
@@ -778,20 +766,8 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_list("requests", requests)
-
-        blk = _Bulk(self, ordered, bypass_document_validation, comment=comment, let=let)
-        for request in requests:
-            try:
-                request._add_to_bulk(blk)
-            except AttributeError:
-                raise TypeError(f"{request!r} is not a valid request") from None
-
-        write_concern = self._write_concern_for(session)
-        bulk_api_result = blk.execute(write_concern, session, _Op.INSERT)
-        if bulk_api_result is not None:
-            return BulkWriteResult(bulk_api_result, True)
-        return BulkWriteResult({}, False)
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("bulk_write not yet supported in native FFI")
 
     def _insert_one(
         self,
@@ -1194,28 +1170,8 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_is_mapping("filter", filter)
-        common.validate_ok_for_replace(replacement)
-        if let is not None:
-            common.validate_is_mapping("let", let)
-        write_concern = self._write_concern_for(session)
-        return UpdateResult(
-            self._update_retryable(
-                filter,
-                replacement,
-                _Op.UPDATE,
-                upsert,
-                write_concern=write_concern,
-                bypass_doc_val=bypass_document_validation,
-                collation=collation,
-                hint=hint,
-                session=session,
-                let=let,
-                sort=sort,
-                comment=comment,
-            ),
-            write_concern.acknowledged,
-        )
+        from pymongo.native_bindings.sync_client import UnsupportedOperationError
+        raise UnsupportedOperationError("replace_one not yet supported in native FFI")
 
     def update_one(
         self,
@@ -1921,10 +1877,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.6
         """
-        # OP_MSG is required to support encryption.
-        if self._database.client._encrypter:
-            raise InvalidOperation("find_raw_batches does not support auto encryption")
-        return RawBatchCursor(self, *args, **kwargs)
+        self._raise_unsupported("find_raw_batches")
 
     def _count_cmd(
         self,
@@ -1998,22 +1951,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
         .. versionadded:: 3.7
         .. _count: https://mongodb.com/docs/manual/reference/command/count/
         """
-        if "session" in kwargs:
-            raise ConfigurationError("estimated_document_count does not support sessions")
-        if comment is not None:
-            kwargs["comment"] = comment
-
-        def _cmd(
-            session: Optional[ClientSession],
-            _server: Server,
-            conn: Connection,
-            read_preference: Optional[_ServerMode],
-        ) -> int:
-            cmd: dict[str, Any] = {"count": self._name}
-            cmd.update(kwargs)
-            return self._count_cmd(session, conn, read_preference, cmd, collation=None)
-
-        return self._retryable_non_cursor_read(_cmd, None, operation=_Op.COUNT)
+        self._raise_unsupported("estimated_document_count")
 
     def count_documents(
         self,
@@ -2077,32 +2015,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
         .. _$center: https://mongodb.com/docs/manual/reference/operator/query/center/
         .. _$centerSphere: https://mongodb.com/docs/manual/reference/operator/query/centerSphere/
         """
-        pipeline = [{"$match": filter}]
-        if "skip" in kwargs:
-            pipeline.append({"$skip": kwargs.pop("skip")})
-        if "limit" in kwargs:
-            pipeline.append({"$limit": kwargs.pop("limit")})
-        if comment is not None:
-            kwargs["comment"] = comment
-        pipeline.append({"$group": {"_id": 1, "n": {"$sum": 1}}})
-        if "hint" in kwargs and not isinstance(kwargs["hint"], str):
-            kwargs["hint"] = helpers_shared._index_document(kwargs["hint"])
-        collation = validate_collation_or_none(kwargs.pop("collation", None))
-
-        def _cmd(
-            session: Optional[ClientSession],
-            _server: Server,
-            conn: Connection,
-            read_preference: Optional[_ServerMode],
-        ) -> int:
-            cmd: dict[str, Any] = {"aggregate": self._name, "pipeline": pipeline, "cursor": {}}
-            cmd.update(kwargs)
-            result = self._aggregate_one_result(conn, read_preference, cmd, collation, session)
-            if not result:
-                return 0
-            return result["n"]
-
-        return self._retryable_non_cursor_read(_cmd, session, _Op.COUNT)
+        self._raise_unsupported("count_documents")
 
     def _retryable_non_cursor_read(
         self,
@@ -2160,10 +2073,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. _createIndexes: https://mongodb.com/docs/manual/reference/command/createIndexes/
         """
-        common.validate_list("indexes", indexes)
-        if comment is not None:
-            kwargs["comment"] = comment
-        return self._create_indexes(indexes, session, **kwargs)
+        self._raise_unsupported("create_indexes")
 
     @_csot.apply
     def _create_indexes(
@@ -2320,13 +2230,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. _wildcard index: https://dochub.mongodb.org/core/index-wildcard/
         """
-        cmd_options = {}
-        if "maxTimeMS" in kwargs:
-            cmd_options["maxTimeMS"] = kwargs.pop("maxTimeMS")
-        if comment is not None:
-            cmd_options["comment"] = comment
-        index = IndexModel(keys, **kwargs)
-        return (self._create_indexes([index], session, **cmd_options))[0]
+        self._raise_unsupported("create_index")
 
     def drop_indexes(
         self,
@@ -2357,9 +2261,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
            Apply this collection's write concern automatically to this operation
            when connected to MongoDB >= 3.4.
         """
-        if comment is not None:
-            kwargs["comment"] = comment
-        self._drop_index("*", session=session, **kwargs)
+        self._raise_unsupported("drop_indexes")
 
     @_csot.apply
     def drop_index(
@@ -2408,7 +2310,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
            when connected to MongoDB >= 3.4.
 
         """
-        self._drop_index(index_or_name, session, comment, **kwargs)
+        self._raise_unsupported("drop_index")
 
     @_csot.apply
     def _drop_index(
@@ -2475,7 +2377,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        return self._list_indexes(session, comment)
+        self._raise_unsupported("list_indexes")
 
     def _list_indexes(
         self,
@@ -2558,13 +2460,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
         .. versionchanged:: 3.6
            Added ``session`` parameter.
         """
-        cursor = self._list_indexes(session=session, comment=comment)
-        info = {}
-        for index in cursor:
-            index["key"] = list(index["key"].items())
-            index = dict(index)  # noqa: PLW2901
-            info[index.pop("name")] = index
-        return info
+        self._raise_unsupported("index_information")
 
     def list_search_indexes(
         self,
@@ -2801,29 +2697,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
         .. versionchanged:: 3.6
            Added ``session`` parameter.
         """
-        dbo = self._database.client.get_database(
-            self._database.name,
-            self.codec_options,
-            self.read_preference,
-            self.write_concern,
-            self.read_concern,
-        )
-        cursor = dbo.list_collections(session=session, filter={"name": self._name}, comment=comment)
-
-        result = None
-        for doc in cursor:
-            result = doc
-            break
-
-        if not result:
-            return {}
-
-        options = result.get("options", {})
-        assert options is not None
-        if "create" in options:
-            del options["create"]
-
-        return options
+        self._raise_unsupported("options")
 
     @_csot.apply
     def _aggregate(
@@ -2981,22 +2855,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.6
         """
-        # OP_MSG is required to support encryption.
-        if self._database.client._encrypter:
-            raise InvalidOperation("aggregate_raw_batches does not support auto encryption")
-        if comment is not None:
-            kwargs["comment"] = comment
-        with self._database.client._tmp_session(session) as s:
-            return cast(
-                RawBatchCursor[_DocumentType],
-                self._aggregate(
-                    _CollectionRawAggregationCommand,
-                    pipeline,
-                    RawBatchCommandCursor,
-                    session=s,
-                    **kwargs,
-                ),
-            )
+        self._raise_unsupported("aggregate_raw_batches")
 
     @_csot.apply
     def rename(
@@ -3034,33 +2893,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
            when connected to MongoDB >= 3.4.
 
         """
-        if not isinstance(new_name, str):
-            raise TypeError(f"new_name must be an instance of str, not {type(new_name)}")
-
-        if not new_name or ".." in new_name:
-            raise InvalidName("collection names cannot be empty")
-        if new_name[0] == "." or new_name[-1] == ".":
-            raise InvalidName("collection names must not start or end with '.'")
-        if "$" in new_name and not new_name.startswith("oplog.$main"):
-            raise InvalidName("collection names must not contain '$'")
-
-        new_name = f"{self._database.name}.{new_name}"
-        cmd = {"renameCollection": self._full_name, "to": new_name}
-        cmd.update(kwargs)
-        if comment is not None:
-            cmd["comment"] = comment
-        write_concern = self._write_concern_for_cmd(cmd, session)
-
-        with self._conn_for_writes(session, operation=_Op.RENAME) as conn:
-            with self._database.client._tmp_session(session) as s:
-                return conn.command(
-                    "admin",
-                    cmd,
-                    write_concern=write_concern,
-                    parse_write_concern_error=True,
-                    session=s,
-                    client=self._database.client,
-                )
+        self._raise_unsupported("rename")
 
     def distinct(
         self,
@@ -3112,42 +2945,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
            Support the `collation` option.
 
         """
-        if not isinstance(key, str):
-            raise TypeError(f"key must be an instance of str, not {type(key)}")
-        if filter is not None:
-            if "query" in kwargs:
-                raise ConfigurationError("can't pass both filter and query")
-            kwargs["query"] = filter
-        collation = validate_collation_or_none(kwargs.pop("collation", None))
-        if hint is not None:
-            if not isinstance(hint, str):
-                hint = helpers_shared._index_document(hint)
-
-        def _cmd(
-            session: Optional[ClientSession],
-            _server: Server,
-            conn: Connection,
-            read_preference: Optional[_ServerMode],
-        ) -> list:  # type: ignore[type-arg]
-            cmd = {"distinct": self._name, "key": key}
-            cmd.update(kwargs)
-            if comment is not None:
-                cmd["comment"] = comment
-            if hint is not None:
-                cmd["hint"] = hint  # type: ignore[assignment]
-            return (
-                self._command(
-                    conn,
-                    cmd,
-                    read_preference=read_preference,
-                    read_concern=self.read_concern,
-                    collation=collation,
-                    session=session,
-                    user_fields={"values": 1},
-                )
-            )["values"]
-
-        return self._retryable_non_cursor_read(_cmd, session, operation=_Op.DISTINCT)
+        self._raise_unsupported("distinct")
 
     def _find_and_modify(
         self,
@@ -3313,12 +3111,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
            Added the `collation` option.
         .. versionadded:: 3.0
         """
-        kwargs["remove"] = True
-        if comment is not None:
-            kwargs["comment"] = comment
-        return self._find_and_modify(
-            filter, projection, sort, let=let, hint=hint, session=session, **kwargs
-        )
+        self._raise_unsupported("find_one_and_delete")
 
     def find_one_and_replace(
         self,
@@ -3423,21 +3216,7 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_ok_for_replace(replacement)
-        kwargs["update"] = replacement
-        if comment is not None:
-            kwargs["comment"] = comment
-        return self._find_and_modify(
-            filter,
-            projection,
-            sort,
-            upsert,
-            return_document,
-            let=let,
-            hint=hint,
-            session=session,
-            **kwargs,
-        )
+        self._raise_unsupported("find_one_and_replace")
 
     def find_one_and_update(
         self,
@@ -3574,20 +3353,4 @@ class Collection(common.BaseObject, Generic[_DocumentType]):
 
         .. versionadded:: 3.0
         """
-        common.validate_ok_for_update(update)
-        common.validate_list_or_none("array_filters", array_filters)
-        kwargs["update"] = update
-        if comment is not None:
-            kwargs["comment"] = comment
-        return self._find_and_modify(
-            filter,
-            projection,
-            sort,
-            upsert,
-            return_document,
-            array_filters,
-            hint=hint,
-            let=let,
-            session=session,
-            **kwargs,
-        )
+        self._raise_unsupported("find_one_and_update")

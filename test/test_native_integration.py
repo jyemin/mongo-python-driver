@@ -188,6 +188,41 @@ class TestPyMongoNativeIntegration(unittest.TestCase):
         with self.assertRaises(UnsupportedOperationError):
             self.coll.aggregate([{"$match": {"x": 1}}])
 
+    def test_replace_one_unsupported(self):
+        """Test replace_one raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.replace_one({"x": 1}, {"x": 2})
+
+    def test_count_documents_unsupported(self):
+        """Test count_documents raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.count_documents({})
+
+    def test_distinct_unsupported(self):
+        """Test distinct raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.distinct("field")
+
+    def test_bulk_write_unsupported(self):
+        """Test bulk_write raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.bulk_write([])
+
+    def test_find_one_and_update_unsupported(self):
+        """Test find_one_and_update raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.find_one_and_update({}, {"$set": {"x": 1}})
+
+    def test_find_one_and_delete_unsupported(self):
+        """Test find_one_and_delete raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.find_one_and_delete({})
+
+    def test_create_index_unsupported(self):
+        """Test create_index raises UnsupportedOperationError."""
+        with self.assertRaises(UnsupportedOperationError):
+            self.coll.create_index("field")
+
     # -------------------------------------------------------------------------
     # Database Operations
     # -------------------------------------------------------------------------
