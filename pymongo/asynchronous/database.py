@@ -1062,6 +1062,21 @@ class AsyncDatabase(common.BaseObject, Generic[_DocumentType]):
                 inner, read_preference, tmp_session, command_name, None, False
             )
 
+    async def mqlv2(
+        self,
+        source: "Union[str, Any]",
+    ) -> "AsyncCommandCursor[Any]":
+        """Run an experimental MQLv2 query and return an AsyncCommandCursor.
+
+        :param source: A MQLv2 query string, or any object with a
+            ``to_mqlv2() -> str`` method (e.g. a ``Pipeline`` or facade
+            ``PipelineBuilder``).
+
+        .. warning:: MQLv2 is experimental and subject to change without notice.
+        """
+        query: str = source if isinstance(source, str) else source.to_mqlv2()
+        return await self.cursor_command({"mqlv2": query})
+
     async def _retryable_read_command(
         self,
         command: Union[str, MutableMapping[str, Any]],

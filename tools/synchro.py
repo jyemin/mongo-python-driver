@@ -172,8 +172,24 @@ if not Path.exists(Path(_pymongo_dest_base)):
 if not Path.exists(Path(_gridfs_dest_base)):
     Path.mkdir(Path(_gridfs_dest_base))
 
+_mqlv2_base = _pymongo_base + "mqlv2/"
+_mqlv2_facades_base = _pymongo_base + "mqlv2/facades/"
+_mqlv2_dest_base = _pymongo_dest_base + "mqlv2/"
+_mqlv2_facades_dest_base = _pymongo_dest_base + "mqlv2/facades/"
+
+for _d in (_mqlv2_dest_base, _mqlv2_facades_dest_base):
+    Path(_d).mkdir(parents=True, exist_ok=True)
+
 async_files = [
     _pymongo_base + f for f in listdir(_pymongo_base) if (Path(_pymongo_base) / f).is_file()
+] + [
+    _mqlv2_base + f
+    for f in listdir(_mqlv2_base)
+    if (Path(_mqlv2_base) / f).is_file() and f.endswith(".py")
+] + [
+    _mqlv2_facades_base + f
+    for f in listdir(_mqlv2_facades_base)
+    if (Path(_mqlv2_facades_base) / f).is_file() and f.endswith(".py")
 ]
 
 gridfs_files = [
