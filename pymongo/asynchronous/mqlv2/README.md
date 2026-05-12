@@ -350,9 +350,10 @@ A mongod with the experimental `mqlv2` command must be reachable on the default 
 (`mongodb://localhost:27017`).
 
 ```bash
-python -m pytest tests/asynchronous/mqlv2/               # all mqlv2 tests
-python -m pytest tests/asynchronous/mqlv2/test_conformance.py  # AST + server
-python -m pytest tests/asynchronous/mqlv2/test_facades.py      # both facades
+python -m pytest test/mqlv2/               # all mqlv2 tests
+python -m pytest test/mqlv2/test_serializer.py   # serializer unit tests (no server)
+python -m pytest test/mqlv2/test_conformance.py  # bare AST + server
+python -m pytest test/mqlv2/test_facades.py      # both facades + server
 ```
 
 Every conformance test asserts both **AST equivalence with the bare form** (dataclass

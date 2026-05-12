@@ -102,6 +102,28 @@ class Expr:
     def unwind(self) -> "Expr":
         return Expr(_ast.UnwindExpr(self._ast))
 
+    def any_(self, predicate: "Expr") -> "Expr":
+        return Expr(_ast.Any(self._ast, predicate._ast))
+
+
+# ---------------------------------------------------------------------------
+# FieldPathTree helper: parse dot-separated path strings into a tree
+# ---------------------------------------------------------------------------
+
+def _paths_to_tree(*paths: str) -> _ast.FieldPathTree:
+    trie: dict = {}
+    for path in paths:
+        node = trie
+        for part in path.split("."):
+            node = node.setdefault(part, {})
+
+    def to_tree(d: dict) -> _ast.FieldPathTree:
+        if not d:
+            return _ast.Leaf()
+        return _ast.Interior(tuple((k, to_tree(v)) for k, v in d.items()))
+
+    return to_tree(trie)
+
 
 # ---------------------------------------------------------------------------
 # PipelineBuilder: stage-chaining over an AST Stage
@@ -115,6 +137,10 @@ class PipelineBuilder:
     def __init__(self, stage: _ast.Stage) -> None:
         self._stage = stage
 
+    @property
+    def stage(self) -> _ast.Stage:
+        return self._stage
+
     def to_mqlv2(self) -> str:
         return Serializer().serialize(self._stage)
 
@@ -127,8 +153,8 @@ class PipelineBuilder:
     def agg(self, expr: Expr) -> "PipelineBuilder":
         return PipelineBuilder(_ast.AggStage(self._stage, expr._ast))
 
-    def project(self, tree: _ast.FieldPathTree) -> "PipelineBuilder":
-        return PipelineBuilder(_ast.ProjectStage(self._stage, tree))
+    def project(self, *paths: str) -> "PipelineBuilder":
+        return PipelineBuilder(_ast.ProjectStage(self._stage, _paths_to_tree(*paths)))
 
     def limit(self, n: int) -> "PipelineBuilder":
         return PipelineBuilder(_ast.LimitStage(self._stage, n))
@@ -150,8 +176,8 @@ class PipelineBuilder:
     def set_(self, *assignments: _ast.Assignment) -> "PipelineBuilder":
         return PipelineBuilder(_ast.SetStage(self._stage, assignments))
 
-    def unset(self, tree: _ast.FieldPathTree) -> "PipelineBuilder":
-        return PipelineBuilder(_ast.UnsetStage(self._stage, tree))
+    def unset(self, *paths: str) -> "PipelineBuilder":
+        return PipelineBuilder(_ast.UnsetStage(self._stage, _paths_to_tree(*paths)))
 
     def distinct(self) -> "PipelineBuilder":
         return PipelineBuilder(_ast.DistinctStage(self._stage))
@@ -315,3 +341,55 @@ def max_(expr: Expr) -> Expr:
 def any_(sequence: Expr, predicate: Expr) -> Expr:
     """seq any (pred) — true if any element of seq satisfies pred."""
     return Expr(_ast.Any(sequence._ast, predicate._ast))
+
+
+def null() -> Expr:
+    return Expr(_ast.ValueLit(_ast.VNull()))
+
+
+def missing() -> Expr:
+    return Expr(_ast.ValueLit(_ast.VMissing()))
+
+
+def date_lit(millis: int) -> Expr:
+    return Expr(_ast.ValueLit(_ast.VDate(millis)))
+
+
+def is_nullish(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("isNullish", (expr._ast,)))
+
+
+def year(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("year", (expr._ast,)))
+
+
+def month(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("month", (expr._ast,)))
+
+
+def day_of_month(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("dayOfMonth", (expr._ast,)))
+
+
+def day_of_year(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("dayOfYear", (expr._ast,)))
+
+
+def day_of_week(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("dayOfWeek", (expr._ast,)))
+
+
+def hour(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("hour", (expr._ast,)))
+
+
+def minute(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("minute", (expr._ast,)))
+
+
+def second(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("second", (expr._ast,)))
+
+
+def millisecond(expr: Expr) -> Expr:
+    return Expr(_ast.FunctionCall("millisecond", (expr._ast,)))

@@ -270,6 +270,25 @@ class ArrExpr(Expr, Generic[E]):
 
 
 # ---------------------------------------------------------------------------
+# FieldPathTree helper
+# ---------------------------------------------------------------------------
+
+def _paths_to_tree(*paths: str) -> _ast.FieldPathTree:
+    trie: dict = {}
+    for path in paths:
+        node = trie
+        for part in path.split("."):
+            node = node.setdefault(part, {})
+
+    def to_tree(d: dict) -> _ast.FieldPathTree:
+        if not d:
+            return _ast.Leaf()
+        return _ast.Interior(tuple((k, to_tree(v)) for k, v in d.items()))
+
+    return to_tree(trie)
+
+
+# ---------------------------------------------------------------------------
 # PipelineBuilder
 # ---------------------------------------------------------------------------
 
@@ -280,6 +299,10 @@ class PipelineBuilder:
 
     def __init__(self, stage: _ast.Stage) -> None:
         self._stage = stage
+
+    @property
+    def stage(self) -> _ast.Stage:
+        return self._stage
 
     def to_mqlv2(self) -> str:
         return Serializer().serialize(self._stage)
@@ -293,8 +316,8 @@ class PipelineBuilder:
     def agg(self, expr: Expr) -> "PipelineBuilder":
         return PipelineBuilder(_ast.AggStage(self._stage, expr._ast))
 
-    def project(self, tree: _ast.FieldPathTree) -> "PipelineBuilder":
-        return PipelineBuilder(_ast.ProjectStage(self._stage, tree))
+    def project(self, *paths: str) -> "PipelineBuilder":
+        return PipelineBuilder(_ast.ProjectStage(self._stage, _paths_to_tree(*paths)))
 
     def limit(self, n: int) -> "PipelineBuilder":
         return PipelineBuilder(_ast.LimitStage(self._stage, n))
@@ -316,8 +339,8 @@ class PipelineBuilder:
     def set_(self, *assignments: _ast.Assignment) -> "PipelineBuilder":
         return PipelineBuilder(_ast.SetStage(self._stage, assignments))
 
-    def unset(self, tree: _ast.FieldPathTree) -> "PipelineBuilder":
-        return PipelineBuilder(_ast.UnsetStage(self._stage, tree))
+    def unset(self, *paths: str) -> "PipelineBuilder":
+        return PipelineBuilder(_ast.UnsetStage(self._stage, _paths_to_tree(*paths)))
 
     def distinct(self) -> "PipelineBuilder":
         return PipelineBuilder(_ast.DistinctStage(self._stage))
@@ -381,6 +404,14 @@ def bool_lit(b: bool) -> BoolExpr:
 
 def date_lit(millis: int) -> DateExpr:
     return DateExpr(_ast.ValueLit(_ast.VDate(millis)))
+
+
+def null_lit() -> Expr:
+    return Expr(_ast.ValueLit(_ast.VNull()))
+
+
+def missing_lit() -> Expr:
+    return Expr(_ast.ValueLit(_ast.VMissing()))
 
 
 def lit(v: Union[None, bool, int, float, str]) -> Expr:
@@ -522,3 +553,7 @@ def max_(expr: NumExpr) -> NumExpr:
 
 def any_(sequence: "ArrExpr[Expr]", predicate: BoolExpr) -> BoolExpr:
     return BoolExpr(_ast.Any(sequence._ast, predicate._ast))
+
+
+def is_nullish(expr: Expr) -> BoolExpr:
+    return BoolExpr(_ast.FunctionCall("isNullish", (expr._ast,)))
