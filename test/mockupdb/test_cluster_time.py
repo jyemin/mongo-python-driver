@@ -47,7 +47,7 @@ class TestClusterTime(PyMongoTestCase):
 
         # First test all commands include $clusterTime with max_wire_version.
         _ = server.autoresponds(
-            "ismaster",
+            "isMaster",
             {
                 "minWireVersion": 0,
                 "maxWireVersion": max_wire_version,
@@ -126,7 +126,7 @@ class TestClusterTime(PyMongoTestCase):
         client = self.simple_client(server.uri, heartbeatFrequencyMS=500)
 
         for _ in range(3):
-            request = server.receives("ismaster")
+            request = server.receives("isMaster")
             # No $clusterTime in heartbeats or handshakes.
             self.assertNotIn("$clusterTime", request)
             request.ok(reply)

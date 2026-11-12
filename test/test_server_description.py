@@ -52,7 +52,7 @@ class TestServerDescription(unittest.TestCase):
         self.assertTrue(s.is_readable)
 
     def test_primary(self):
-        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs"})
+        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs"})
 
         self.assertEqual(SERVER_TYPE.RSPrimary, s.server_type)
         self.assertEqual("RSPrimary", s.server_type_name)
@@ -61,7 +61,7 @@ class TestServerDescription(unittest.TestCase):
 
     def test_secondary(self):
         s = parse_hello_response(
-            {"ok": 1, HelloCompat.LEGACY_CMD: False, "secondary": True, "setName": "rs"}
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: False, "secondary": True, "setName": "rs"}
         )
 
         self.assertEqual(SERVER_TYPE.RSSecondary, s.server_type)
@@ -71,7 +71,7 @@ class TestServerDescription(unittest.TestCase):
 
     def test_arbiter(self):
         s = parse_hello_response(
-            {"ok": 1, HelloCompat.LEGACY_CMD: False, "arbiterOnly": True, "setName": "rs"}
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: False, "arbiterOnly": True, "setName": "rs"}
         )
 
         self.assertEqual(SERVER_TYPE.RSArbiter, s.server_type)
@@ -80,7 +80,7 @@ class TestServerDescription(unittest.TestCase):
         self.assertFalse(s.is_readable)
 
     def test_other(self):
-        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_CMD: False, "setName": "rs"})
+        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_PRIMARY: False, "setName": "rs"})
 
         self.assertEqual(SERVER_TYPE.RSOther, s.server_type)
         self.assertEqual("RSOther", s.server_type_name)
@@ -88,7 +88,7 @@ class TestServerDescription(unittest.TestCase):
         s = parse_hello_response(
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "hidden": True,
                 "setName": "rs",
@@ -111,7 +111,7 @@ class TestServerDescription(unittest.TestCase):
         s = parse_hello_response(
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "primary": "a:27017",
                 "tags": {"a": "foo", "b": "baz"},
@@ -134,7 +134,7 @@ class TestServerDescription(unittest.TestCase):
         self.assertEqual(25, s.max_wire_version)
 
     def test_defaults(self):
-        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_CMD: True})
+        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_PRIMARY: True})
         self.assertEqual(common.MAX_BSON_SIZE, s.max_bson_size)
         self.assertEqual(common.MAX_MESSAGE_SIZE, s.max_message_size)
         self.assertEqual(common.MIN_WIRE_VERSION, s.min_wire_version)
@@ -142,18 +142,18 @@ class TestServerDescription(unittest.TestCase):
         self.assertEqual(common.MAX_WRITE_BATCH_SIZE, s.max_write_batch_size)
 
     def test_standalone(self):
-        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_CMD: True})
+        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_PRIMARY: True})
         self.assertEqual(SERVER_TYPE.Standalone, s.server_type)
 
         # Mongod started with --slave.
         # master-slave replication was removed in MongoDB 4.0.
-        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_CMD: False})
+        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_PRIMARY: False})
         self.assertEqual(SERVER_TYPE.Standalone, s.server_type)
         self.assertTrue(s.is_writable)
         self.assertTrue(s.is_readable)
 
     def test_ok_false(self):
-        s = parse_hello_response({"ok": 0, HelloCompat.LEGACY_CMD: True})
+        s = parse_hello_response({"ok": 0, HelloCompat.LEGACY_PRIMARY: True})
         self.assertEqual(SERVER_TYPE.Unknown, s.server_type)
         self.assertFalse(s.is_writable)
         self.assertFalse(s.is_readable)
@@ -162,7 +162,7 @@ class TestServerDescription(unittest.TestCase):
         s = parse_hello_response(
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "hosts": ["a"],
                 "passives": ["b:27018"],
                 "arbiters": ["c"],
@@ -182,7 +182,7 @@ class TestServerDescription(unittest.TestCase):
         s = parse_hello_response(
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "setName": "rs",
                 "topologyVersion": topology_version,
             }
@@ -198,7 +198,7 @@ class TestServerDescription(unittest.TestCase):
 
     def test_topology_version_not_present(self):
         # No topologyVersion field.
-        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs"})
+        s = parse_hello_response({"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs"})
 
         self.assertEqual(SERVER_TYPE.RSPrimary, s.server_type)
         self.assertEqual(None, s.topology_version)

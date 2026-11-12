@@ -48,7 +48,7 @@ class TestHelloLatched(UnitTest):
         def mock_conn_command(db, cmd, **kwargs):
             """Returns mocked hello and ismaster results for conn.command"""
             self._sent.append(cmd.copy())
-            if cmd.get("ismaster") == 1:
+            if cmd.get("isMaster") == 1:
                 return {"ok": 1, "helloOk": True, "ismaster": True, "maxWireVersion": 25}
             return {"ok": 1, "isWritablePrimary": True, "maxWireVersion": 25}
 
@@ -59,8 +59,8 @@ class TestHelloLatched(UnitTest):
         conn._hello(None, None)
         # Verify hello_ok is True
         self.assertTrue(conn.hello_ok)
-        # Verify command sent is ismaster
-        self.assertEqual(self._sent[0].get("ismaster"), 1)
+        # Verify command sent is isMaster
+        self.assertEqual(self._sent[0].get("isMaster"), 1)
         self.assertEqual(self._sent[0].get("helloOk"), True)
 
         # Second hello
@@ -69,13 +69,13 @@ class TestHelloLatched(UnitTest):
         self.assertTrue(conn.hello_ok)
         # Verify command sent is hello
         self.assertEqual(self._sent[1].get("hello"), 1)
-        self.assertIsNone(self._sent[1].get("ismaster", None))
+        self.assertIsNone(self._sent[1].get("isMaster", None))
 
         # Third hello
         conn._hello(None, None)
         # Verify connection continues to use hello
         self.assertEqual(self._sent[2].get("hello"), 1)
-        self.assertIsNone(self._sent[2].get("ismaster", None))
+        self.assertIsNone(self._sent[2].get("isMaster", None))
 
 
 if __name__ == "__main__":

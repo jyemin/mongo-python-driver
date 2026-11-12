@@ -154,7 +154,7 @@ class TestSingleServerTopology(TopologyTest):
                 SERVER_TYPE.RSPrimary,
                 {
                     "ok": 1,
-                    HelloCompat.LEGACY_CMD: True,
+                    HelloCompat.LEGACY_PRIMARY: True,
                     "hosts": ["a"],
                     "setName": "rs",
                     "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
@@ -164,7 +164,7 @@ class TestSingleServerTopology(TopologyTest):
                 SERVER_TYPE.RSSecondary,
                 {
                     "ok": 1,
-                    HelloCompat.LEGACY_CMD: False,
+                    HelloCompat.LEGACY_PRIMARY: False,
                     "secondary": True,
                     "hosts": ["a"],
                     "setName": "rs",
@@ -175,7 +175,7 @@ class TestSingleServerTopology(TopologyTest):
                 SERVER_TYPE.Mongos,
                 {
                     "ok": 1,
-                    HelloCompat.LEGACY_CMD: True,
+                    HelloCompat.LEGACY_PRIMARY: True,
                     "msg": "isdbgrid",
                     "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
                 },
@@ -184,7 +184,7 @@ class TestSingleServerTopology(TopologyTest):
                 SERVER_TYPE.RSArbiter,
                 {
                     "ok": 1,
-                    HelloCompat.LEGACY_CMD: False,
+                    HelloCompat.LEGACY_PRIMARY: False,
                     "arbiterOnly": True,
                     "hosts": ["a"],
                     "setName": "rs",
@@ -195,7 +195,7 @@ class TestSingleServerTopology(TopologyTest):
                 SERVER_TYPE.Standalone,
                 {
                     "ok": 1,
-                    HelloCompat.LEGACY_CMD: True,
+                    HelloCompat.LEGACY_PRIMARY: True,
                     "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
                 },
             ),
@@ -206,7 +206,7 @@ class TestSingleServerTopology(TopologyTest):
                 SERVER_TYPE.Standalone,
                 {
                     "ok": 1,
-                    HelloCompat.LEGACY_CMD: False,
+                    HelloCompat.LEGACY_PRIMARY: False,
                     "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
                 },
             ),
@@ -315,7 +315,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "b"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "b"]},
         )
 
         got_hello(
@@ -323,7 +323,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -342,7 +342,7 @@ class TestMultiServerTopology(TopologyTest):
             ("a", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": False,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -354,7 +354,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -371,7 +371,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "b"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "b"]},
         )
 
         got_hello(
@@ -379,7 +379,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -398,7 +398,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "b"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "b"]},
         )
 
         got_hello(
@@ -406,7 +406,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -432,7 +432,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "b", "c"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "b", "c"]},
         )
 
         self.assertEqual(2, len(t.description.server_descriptions()))
@@ -450,7 +450,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "b"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "b"]},
         )
 
         got_hello(
@@ -458,7 +458,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -475,7 +475,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "b"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "b"]},
         )
 
         self.assertEqual(SERVER_TYPE.RSPrimary, get_type(t, "a"))
@@ -511,7 +511,7 @@ class TestMultiServerTopology(TopologyTest):
         self.assertEqual(t.description.topology_type, TOPOLOGY_TYPE.ReplicaSetNoPrimary)
         t.open()
         got_hello(
-            t, address, {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a"]}
+            t, address, {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a"]}
         )
 
         self.assertEqual(t.description.replica_set_name, "rs")
@@ -520,7 +520,7 @@ class TestMultiServerTopology(TopologyTest):
         # Another response from the primary. Tests the code that processes
         # primary response when topology type is already ReplicaSetWithPrimary.
         got_hello(
-            t, address, {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a"]}
+            t, address, {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a"]}
         )
 
         # No change.
@@ -545,7 +545,7 @@ class TestMultiServerTopology(TopologyTest):
             address,
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a"],
@@ -560,7 +560,7 @@ class TestMultiServerTopology(TopologyTest):
         t.description.check_compatible()  # No error.
 
         got_hello(
-            t, address, {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a"]}
+            t, address, {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a"]}
         )
 
         # Use defaults.
@@ -573,7 +573,7 @@ class TestMultiServerTopology(TopologyTest):
             address,
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "setName": "rs",
                 "hosts": ["a"],
                 "minWireVersion": 1,
@@ -591,7 +591,7 @@ class TestMultiServerTopology(TopologyTest):
             address,
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "setName": "rs",
                 "hosts": ["a"],
                 "minWireVersion": common.MAX_SUPPORTED_WIRE_VERSION + 1,
@@ -618,7 +618,7 @@ class TestMultiServerTopology(TopologyTest):
             address,
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "setName": "rs",
                 "hosts": ["a"],
                 "minWireVersion": 0,
@@ -651,7 +651,7 @@ class TestMultiServerTopology(TopologyTest):
             ("a", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
                 "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
@@ -664,7 +664,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
@@ -682,7 +682,7 @@ class TestMultiServerTopology(TopologyTest):
             ("b", 27017),
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "setName": "rs",
                 "hosts": ["a", "b"],
                 "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,
@@ -698,7 +698,7 @@ class TestMultiServerTopology(TopologyTest):
         got_hello(
             t,
             ("a", 27017),
-            {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a", "c", "b"]},
+            {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a", "c", "b"]},
         )
         self.assertEqual(
             repr(t.description),
@@ -838,7 +838,7 @@ class TestServerSelectionErrors(TopologyTest):
             address,
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "rs",
                 "hosts": ["a"],
@@ -854,7 +854,7 @@ class TestServerSelectionErrors(TopologyTest):
     def test_no_secondary(self):
         t = create_mock_topology(replica_set_name="rs")
         got_hello(
-            t, address, {"ok": 1, HelloCompat.LEGACY_CMD: True, "setName": "rs", "hosts": ["a"]}
+            t, address, {"ok": 1, HelloCompat.LEGACY_PRIMARY: True, "setName": "rs", "hosts": ["a"]}
         )
 
         self.assertMessage(
@@ -879,7 +879,7 @@ class TestServerSelectionErrors(TopologyTest):
             address,
             {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: False,
+                HelloCompat.LEGACY_PRIMARY: False,
                 "secondary": True,
                 "setName": "wrong",
                 "hosts": ["a"],

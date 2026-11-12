@@ -204,7 +204,7 @@ class MockClient(MongoClient):
         elif host in self.mock_standalones:
             response = {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "minWireVersion": min_wire_version,
                 "maxWireVersion": max_wire_version,
                 "maxWriteBatchSize": max_write_batch_size,
@@ -215,7 +215,7 @@ class MockClient(MongoClient):
             # Simulate a replica set member.
             response = {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: primary,
+                HelloCompat.LEGACY_PRIMARY: primary,
                 "secondary": not primary,
                 "setName": "rs",
                 "hosts": self.mock_hello_hosts,
@@ -233,7 +233,7 @@ class MockClient(MongoClient):
         elif host in self.mock_mongoses:
             response = {
                 "ok": 1,
-                HelloCompat.LEGACY_CMD: True,
+                HelloCompat.LEGACY_PRIMARY: True,
                 "minWireVersion": min_wire_version,
                 "maxWireVersion": max_wire_version,
                 "msg": "isdbgrid",

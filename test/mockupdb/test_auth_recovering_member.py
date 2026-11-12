@@ -37,7 +37,7 @@ class TestAuthRecoveringMember(PyMongoTestCase):
         # Test that we don't attempt auth against a recovering RS member.
         server = MockupDB()
         server.autoresponds(
-            "ismaster",
+            "isMaster",
             {
                 "minWireVersion": 2,
                 "maxWireVersion": common.MIN_SUPPORTED_WIRE_VERSION,

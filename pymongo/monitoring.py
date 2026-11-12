@@ -518,7 +518,7 @@ def register(listener: _EventListener) -> None:
 def _is_speculative_authenticate(command_name: str, doc: Mapping[str, Any]) -> bool:
     # Check the name first, doc may be a RawBSONDocument where `in` decodes the whole document.
     return bool(
-        command_name.lower() in ("hello", HelloCompat.LEGACY_CMD)
+        command_name.lower() in ("hello", HelloCompat.LEGACY_CMD.lower())
         and "speculativeAuthenticate" in doc
     )
 

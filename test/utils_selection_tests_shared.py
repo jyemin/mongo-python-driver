@@ -60,7 +60,7 @@ def make_server_description(server, hosts):
         hello_response["setName"] = "rs"
 
     if server_type == "RSPrimary":
-        hello_response[HelloCompat.LEGACY_CMD] = True
+        hello_response[HelloCompat.LEGACY_PRIMARY] = True
     elif server_type == "RSSecondary":
         hello_response["secondary"] = True
     elif server_type == "Mongos":

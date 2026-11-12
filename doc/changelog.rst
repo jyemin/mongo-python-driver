@@ -6,6 +6,9 @@ Changes in Version 4.20.0 (2026/XX/XX)
 
 - The client handshake metadata now reports a detected coding agent in
   ``client.env.agent`` (`PYTHON-5929`_).
+- The legacy hello command that PyMongo sends to servers that do not support
+  ``hello`` is now spelled ``isMaster``, the casing that the MongoDB Handshake
+  specification calls correct, in place of ``ismaster``.
 - Removed the beta ``QueryType.PREFIXPREVIEW``, ``QueryType.SUFFIXPREVIEW``,
   and ``QueryType.SUBSTRINGPREVIEW`` query types. Use
   :attr:`~pymongo.encryption.QueryType.PREFIX`,

@@ -60,7 +60,7 @@ def _get_server_type(doc: Mapping[str, Any]) -> int:
 
 class HelloCompat:
     CMD = "hello"
-    LEGACY_CMD = "ismaster"
+    LEGACY_CMD = "isMaster"
     PRIMARY = "isWritablePrimary"
     LEGACY_PRIMARY = "ismaster"
     LEGACY_ERROR = "not master"

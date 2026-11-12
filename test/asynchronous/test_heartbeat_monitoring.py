@@ -74,7 +74,7 @@ class TestHeartbeatMonitoring(AsyncIntegrationTest):
     async def test_standalone(self):
         responses = (
             ("a", 27017),
-            {HelloCompat.LEGACY_CMD: True, "maxWireVersion": 4, "minWireVersion": 0, "ok": 1},
+            {HelloCompat.LEGACY_PRIMARY: True, "maxWireVersion": 4, "minWireVersion": 0, "ok": 1},
         )
         uri = "mongodb://a:27017"
         expected_results = ["ServerHeartbeatStartedEvent", "ServerHeartbeatSucceededEvent"]

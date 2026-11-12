@@ -62,8 +62,8 @@ def _check_handshake_data(request):
 
 class TestHandshake(unittest.TestCase):
     def hello_with_option_helper(self, protocol, **kwargs):
-        hello = "hello" if ("apiVersion" in kwargs or "loadBalanced" in kwargs) else "ismaster"
-        # `db.command("hello"|"ismaster")` commands are the same for primaries and
+        hello = "hello" if ("apiVersion" in kwargs or "loadBalanced" in kwargs) else "isMaster"
+        # `db.command("hello"|"isMaster")` commands are the same for primaries and
         # secondaries, so we only need one server.
         primary = MockupDB()
         # Set up a custom handler to save the first request from the driver.
@@ -137,44 +137,44 @@ class TestHandshake(unittest.TestCase):
         self.addCleanup(client.close)
 
         # New monitoring connections send data during handshake.
-        heartbeat = primary.receives("ismaster")
+        heartbeat = primary.receives("isMaster")
         _check_handshake_data(heartbeat)
         heartbeat.ok(primary_response)
 
-        heartbeat = secondary.receives("ismaster")
+        heartbeat = secondary.receives("isMaster")
         _check_handshake_data(heartbeat)
         heartbeat.ok(secondary_response)
 
         # Subsequent heartbeats have no client data.
-        primary.receives("ismaster", 1, client=absent).ok(error_response)
-        secondary.receives("ismaster", 1, client=absent).ok(error_response)
+        primary.receives("isMaster", 1, client=absent).ok(error_response)
+        secondary.receives("isMaster", 1, client=absent).ok(error_response)
 
         # The heartbeat retry (on a new connection) does have client data.
-        heartbeat = primary.receives("ismaster")
+        heartbeat = primary.receives("isMaster")
         _check_handshake_data(heartbeat)
         heartbeat.ok(primary_response)
 
-        heartbeat = secondary.receives("ismaster")
+        heartbeat = secondary.receives("isMaster")
         _check_handshake_data(heartbeat)
         heartbeat.ok(secondary_response)
 
         # Still no client data.
-        primary.receives("ismaster", 1, client=absent).ok(primary_response)
-        secondary.receives("ismaster", 1, client=absent).ok(secondary_response)
+        primary.receives("isMaster", 1, client=absent).ok(primary_response)
+        secondary.receives("isMaster", 1, client=absent).ok(secondary_response)
 
         # After a disconnect, next ismaster has client data again.
-        primary.receives("ismaster", 1, client=absent).hangup()
-        heartbeat = primary.receives("ismaster")
+        primary.receives("isMaster", 1, client=absent).hangup()
+        heartbeat = primary.receives("isMaster")
         _check_handshake_data(heartbeat)
         heartbeat.ok(primary_response)
 
-        secondary.autoresponds("ismaster", secondary_response)
+        secondary.autoresponds("isMaster", secondary_response)
 
         # Start a command, so the client opens an application socket.
         future = go(client.db.command, "whatever")
 
         for request in primary:
-            if request.matches("ismaster"):
+            if request.matches("isMaster"):
                 if request.client_port == heartbeat.client_port:
                     # This is the monitor again, keep going.
                     request.ok(primary_response)
@@ -202,12 +202,12 @@ class TestHandshake(unittest.TestCase):
         self.addCleanup(client.close)
 
         # New monitoring connections send data during handshake.
-        heartbeat = server.receives("ismaster")
+        heartbeat = server.receives("isMaster")
         heartbeat.ok(primary_response)
 
         future = go(client.db.command, "whatever")
         for request in server:
-            if request.matches("ismaster"):
+            if request.matches("isMaster"):
                 if request.client_port == heartbeat.client_port:
                     # This is the monitor again, keep going.
                     request.ok(primary_response)

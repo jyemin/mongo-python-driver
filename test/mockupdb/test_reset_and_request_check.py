@@ -55,7 +55,7 @@ class TestResetAndRequestCheck(PyMongoTestCase):
                 ismaster=True, minWireVersion=2, maxWireVersion=MIN_SUPPORTED_WIRE_VERSION
             )
 
-        self.server.autoresponds("ismaster", responder)
+        self.server.autoresponds("isMaster", responder)
         self.server.run()
         self.addCleanup(self.server.stop)
 

@@ -47,7 +47,7 @@ class TestSlaveOkayRS(unittest.TestCase):
 
         hosts = [server.address_string for server in (self.primary, self.secondary)]
         self.primary.autoresponds(
-            "ismaster",
+            "isMaster",
             ismaster=True,
             setName="rs",
             hosts=hosts,
@@ -55,7 +55,7 @@ class TestSlaveOkayRS(unittest.TestCase):
             maxWireVersion=MIN_SUPPORTED_WIRE_VERSION,
         )
         self.secondary.autoresponds(
-            "ismaster",
+            "isMaster",
             ismaster=False,
             secondary=True,
             setName="rs",

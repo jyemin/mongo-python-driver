@@ -48,7 +48,7 @@ class TestQueryAndReadModeSharded(PyMongoTestCase):
         """Test OP_MSG sends non-primary $readPreference and never $query."""
         server = MockupDB()
         server.autoresponds(
-            "ismaster",
+            "isMaster",
             ismaster=True,
             msg="isdbgrid",
             minWireVersion=2,

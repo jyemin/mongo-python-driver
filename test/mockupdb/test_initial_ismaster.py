@@ -44,13 +44,13 @@ class TestInitialIsMaster(PyMongoTestCase):
 
         # A single ismaster is enough for the client to be connected.
         self.assertFalse(client.nodes)
-        server.receives("ismaster").ok(
+        server.receives("isMaster").ok(
             ismaster=True, minWireVersion=2, maxWireVersion=MIN_SUPPORTED_WIRE_VERSION
         )
         wait_until(lambda: client.nodes, "update nodes", timeout=1)
 
         # At least 10 seconds before next heartbeat.
-        server.receives("ismaster").ok(
+        server.receives("isMaster").ok(
             ismaster=True, minWireVersion=2, maxWireVersion=MIN_SUPPORTED_WIRE_VERSION
         )
         self.assertGreaterEqual(time.time() - start, 10)

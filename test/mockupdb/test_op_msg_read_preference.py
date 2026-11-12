@@ -97,11 +97,11 @@ class TestOpMsgReplicaSet(OpMsgReadPrefBase):
             "minWireVersion": 2,
             "maxWireVersion": MIN_SUPPORTED_WIRE_VERSION,
         }
-        cls.primary.autoresponds(CommandBase("ismaster"), primary_ismaster)
+        cls.primary.autoresponds(CommandBase("isMaster"), primary_ismaster)
         secondary_ismaster = copy.copy(primary_ismaster)
         secondary_ismaster["ismaster"] = False
         secondary_ismaster["secondary"] = True
-        cls.secondary.autoresponds(CommandBase("ismaster"), secondary_ismaster)
+        cls.secondary.autoresponds(CommandBase("isMaster"), secondary_ismaster)
 
     @classmethod
     def tearDownClass(cls):
@@ -123,7 +123,7 @@ class TestOpMsgReplicaSet(OpMsgReadPrefBase):
 
         # Run a command on a secondary to discover the topology. This ensures
         # that secondaryPreferred commands will select the secondary.
-        client.admin.command("ismaster", read_preference=ReadPreference.SECONDARY)
+        client.admin.command("isMaster", read_preference=ReadPreference.SECONDARY)
         return client
 
 

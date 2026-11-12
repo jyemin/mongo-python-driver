@@ -58,7 +58,7 @@ class TestClientMetadataProse(IntegrationTest):
         self.handshake_req = None
 
         def respond(r):
-            if "ismaster" in r:
+            if "isMaster" in r:
                 # then this is a handshake request
                 self.handshake_req = r
             return r.reply(OpMsgReply(maxWireVersion=13))

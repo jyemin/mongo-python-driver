@@ -77,7 +77,7 @@ class TestRetryableErrorCodeCatch(PyMongoTestCase):
         server = MockupDB()
         server.run()
         self.addCleanup(server.stop)
-        server.autoresponds("ismaster", maxWireVersion=MIN_SUPPORTED_WIRE_VERSION)
+        server.autoresponds("isMaster", maxWireVersion=MIN_SUPPORTED_WIRE_VERSION)
 
         client = self.simple_client(server.uri)
 

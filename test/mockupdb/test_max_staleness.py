@@ -36,7 +36,7 @@ class TestMaxStalenessMongos(PyMongoTestCase):
     def test_mongos(self):
         mongos = MockupDB()
         mongos.autoresponds(
-            "ismaster", maxWireVersion=MIN_SUPPORTED_WIRE_VERSION, ismaster=True, msg="isdbgrid"
+            "isMaster", maxWireVersion=MIN_SUPPORTED_WIRE_VERSION, ismaster=True, msg="isdbgrid"
         )
         mongos.run()
         self.addCleanup(mongos.stop)

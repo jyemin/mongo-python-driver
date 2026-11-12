@@ -23,7 +23,8 @@ from pymongo.hello import HelloCompat
 from pymongo.helpers_shared import _SENSITIVE_COMMANDS
 
 _SUPPORTED_COMPRESSORS = {"snappy", "zlib", "zstd"}
-_NO_COMPRESSION = {HelloCompat.CMD, HelloCompat.LEGACY_CMD}
+# The server accepts the legacy hello command with either casing, so an application may send either.
+_NO_COMPRESSION = {HelloCompat.CMD, HelloCompat.LEGACY_CMD, HelloCompat.LEGACY_CMD.lower()}
 _NO_COMPRESSION.update(_SENSITIVE_COMMANDS)
 
 

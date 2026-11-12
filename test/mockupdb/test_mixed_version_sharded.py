@@ -50,12 +50,12 @@ class TestMixedVersionSharded(PyMongoTestCase):
 
         # Max wire version is too old for the upgraded operation.
         self.mongos_old.autoresponds(
-            "ismaster", ismaster=True, msg="isdbgrid", maxWireVersion=upgrade.wire_version - 1
+            "isMaster", ismaster=True, msg="isdbgrid", maxWireVersion=upgrade.wire_version - 1
         )
 
         # Up-to-date max wire version.
         self.mongos_new.autoresponds(
-            "ismaster", ismaster=True, msg="isdbgrid", maxWireVersion=upgrade.wire_version
+            "isMaster", ismaster=True, msg="isdbgrid", maxWireVersion=upgrade.wire_version
         )
 
         self.mongoses_uri = (

@@ -54,7 +54,7 @@ class TestSlaveOkaySharded(unittest.TestCase):
             server.run()
             self.addCleanup(server.stop)
             server.autoresponds(
-                "ismaster",
+                "isMaster",
                 minWireVersion=2,
                 maxWireVersion=MIN_SUPPORTED_WIRE_VERSION,
                 ismaster=True,

@@ -51,9 +51,9 @@ class TestNetworkDisconnectPrimary(unittest.TestCase):
             minWireVersion=2,
             maxWireVersion=MIN_SUPPORTED_WIRE_VERSION,
         )
-        primary.autoresponds("ismaster", primary_response)
+        primary.autoresponds("isMaster", primary_response)
         secondary.autoresponds(
-            "ismaster",
+            "isMaster",
             ismaster=False,
             secondary=True,
             setName="rs",
@@ -75,7 +75,7 @@ class TestNetworkDisconnectPrimary(unittest.TestCase):
 
         # The primary hangs replying to ismaster.
         ismaster_future = Future()
-        primary.autoresponds("ismaster", lambda r: r.ok(ismaster_future.result()))
+        primary.autoresponds("isMaster", lambda r: r.ok(ismaster_future.result()))
 
         # Network error on application operation.
         with self.assertRaises(ConnectionFailure):

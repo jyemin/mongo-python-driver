@@ -45,7 +45,7 @@ class TestGetmoreSharded(PyMongoTestCase):
         for server in servers:
             server.subscribe(q.put)
             server.autoresponds(
-                "ismaster",
+                "isMaster",
                 ismaster=True,
                 msg="isdbgrid",
                 minWireVersion=2,

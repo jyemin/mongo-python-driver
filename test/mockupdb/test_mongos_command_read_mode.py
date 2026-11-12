@@ -42,7 +42,7 @@ class TestMongosCommandReadMode(unittest.TestCase):
     def test_aggregate(self):
         server = MockupDB()
         server.autoresponds(
-            "ismaster",
+            "isMaster",
             ismaster=True,
             msg="isdbgrid",
             minWireVersion=2,
@@ -81,7 +81,7 @@ def create_mongos_read_mode_test(mode, operation):
         self.addCleanup(server.stop)
         server.run()
         server.autoresponds(
-            "ismaster",
+            "isMaster",
             ismaster=True,
             msg="isdbgrid",
             minWireVersion=2,

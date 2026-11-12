@@ -60,7 +60,7 @@ def create_slave_ok_single_test(mode, server_type, ismaster, operation):
         ismaster_with_version = ismaster.copy()
         ismaster_with_version["minWireVersion"] = 2
         ismaster_with_version["maxWireVersion"] = MIN_SUPPORTED_WIRE_VERSION
-        self.server.autoresponds("ismaster", **ismaster_with_version)
+        self.server.autoresponds("isMaster", **ismaster_with_version)
         self.assertIn(
             operation.op_type, ("always-use-secondary", "may-use-secondary", "must-use-primary")
         )
