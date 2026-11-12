@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import binascii
+import contextlib
 import copy
 import functools
 import gc
@@ -35,6 +36,7 @@ from collections.abc import Mapping
 from inspect import iscoroutinefunction
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
+from unittest import mock
 
 import pytest
 
@@ -51,6 +53,8 @@ from pymongo.asynchronous.command_cursor import AsyncCommandCursor
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.asynchronous.encryption import AsyncClientEncryption
 from pymongo.asynchronous.helpers import anext
+from pymongo.asynchronous.monitor import Monitor, _RttMonitor
+from pymongo.asynchronous.pool import AsyncConnection
 from pymongo.client_session_shared import _TxnState
 from pymongo.driver_info import DriverInfo
 from pymongo.encryption_options import _HAVE_PYMONGOCRYPT, AutoEncryptionOpts
@@ -110,6 +114,7 @@ from test.utils_shared import (
     wait_until,
 )
 from test.version import Version
+from test.wire_messages import WireMessageRecorder, assert_messages_match
 
 if TYPE_CHECKING:
     from bson.objectid import ObjectId
@@ -162,6 +167,20 @@ async def is_run_on_requirement_satisfied(requirement):
         else:
             auth_satisfied = not async_client_context.auth_enabled
 
+    compression_satisfied = True
+    req_compression = requirement.get("compression")
+    if req_compression is not None:
+        compression_enabled = bool(async_client_context.default_client_options.get("compressors"))
+        compression_satisfied = req_compression == compression_enabled
+
+    server_api_satisfied = True
+    req_server_api = requirement.get("serverApi")
+    if req_server_api is not None:
+        server_api_declared = (
+            async_client_context.default_client_options.get("server_api") is not None
+        )
+        server_api_satisfied = req_server_api == server_api_declared
+
     csfle_satisfied = True
     req_csfle = requirement.get("csfle")
     if req_csfle is True:
@@ -184,6 +203,8 @@ async def is_run_on_requirement_satisfied(requirement):
         and max_version_satisfied
         and params_satisfied
         and auth_satisfied
+        and compression_satisfied
+        and server_api_satisfied
         and csfle_satisfied
     )
 
@@ -235,6 +256,73 @@ class NonLazyCursor:
         self.client = None
 
 
+@contextlib.contextmanager
+def _host_environment(env):
+    """Make the driver observe the given environment variables, a null value meaning unset."""
+    if not env:
+        yield
+        return
+    with mock.patch.dict(os.environ, {k: v for k, v in env.items() if v is not None}):
+        for name, value in env.items():
+            if value is None:
+                os.environ.pop(name, None)
+        yield
+
+
+def _wire_recorder_for(conn):
+    listeners = conn.opts._event_listeners
+    if listeners is None:
+        return None
+    for listener in listeners.event_listeners():
+        recorder = getattr(listener, "wire_recorder", None)
+        if recorder is not None:
+            return recorder
+    return None
+
+
+def _tag_pool_of(monitor_class, source):
+    init = monitor_class.__init__
+
+    @functools.wraps(init)
+    def tagged_init(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        self._pool._wire_source = source
+
+    monitor_class.__init__ = tagged_init
+
+
+def _install_wire_hooks():
+    """Make connections report the messages that they write, for observeWireMessages.
+
+    The hook finds the recorder of a connection's client through the event listener that the
+    client's pools share, so connections of clients that do not observe wire messages are not
+    affected. The monitor and the RTT monitor each tag the pool that they create.
+    """
+    if getattr(AsyncConnection, "_wire_hooked", False):
+        return
+    send_message = AsyncConnection.send_message
+
+    async def recording_send_message(self, message, max_doc_size):
+        recorder = _wire_recorder_for(self)
+        if recorder is not None:
+            source = getattr(self.pool_ref(), "_wire_source", "application")
+            if source == "application":
+                # The handshake is everything before the connection is ready, including auth.
+                phase = "operation" if self.ready else "handshake"
+            else:
+                # A monitor's handshake is the first message that it writes on a connection.
+                sent = getattr(self, "_wire_sent", 0)
+                self._wire_sent = sent + 1
+                phase = "operation" if sent else "handshake"
+            recorder.record(source, phase, self.address, message)
+        await send_message(self, message, max_doc_size)
+
+    AsyncConnection.send_message = recording_send_message
+    _tag_pool_of(Monitor, "monitor")
+    _tag_pool_of(_RttMonitor, "rtt")
+    AsyncConnection._wire_hooked = True
+
+
 class EntityMapUtil:
     """Utility class that implements an entity map as per the unified
     test format specification.
@@ -243,6 +331,7 @@ class EntityMapUtil:
     def __init__(self, test_class):
         self._entities: dict[str, Any] = {}
         self._listeners: dict[str, EventListenerUtil] = {}
+        self._wire_recorders: dict[str, WireMessageRecorder] = {}
         self._session_lsids: dict[str, Mapping[str, Any]] = {}
         self.test: UnifiedSpecTestMixinV1 = test_class
 
@@ -344,8 +433,19 @@ class EntityMapUtil:
                 )
             if uri:
                 kwargs["h"] = uri
-            client = await self.test.async_rs_or_single_client(**kwargs)
-            await client.aconnect()
+            if "observeWireMessages" in spec:
+                _install_wire_hooks()
+                observe = spec["observeWireMessages"]
+                recorder = WireMessageRecorder(observe["connections"], observe["phases"])
+                # Connections find their recorder through the listener, which every pool of the
+                # client shares. Recording starts before the client is constructed.
+                listener.wire_recorder = recorder
+                self._wire_recorders[spec["id"]] = recorder
+            # The host environment stays in effect until the client is connected, because the
+            # monitors read it when they start.
+            with _host_environment(spec.get("setHostEnvironment")):
+                client = await self.test.async_rs_or_single_client(**kwargs)
+                await client.aconnect()
             # Wait for pool to be populated.
             if "awaitMinPoolSizeMS" in spec:
                 pool = await async_get_pool(client)
@@ -491,7 +591,7 @@ class UnifiedSpecTestMixinV1(AsyncIntegrationTest):
     a class attribute ``TEST_SPEC``.
     """
 
-    SCHEMA_VERSION = Version.from_string("1.28")
+    SCHEMA_VERSION = Version.from_string("1.30")
     RUN_ON_LOAD_BALANCER = True
     TEST_SPEC: Any
     TEST_PATH = ""  # This gets filled in by generate_test_classes
@@ -1264,6 +1364,66 @@ class UnifiedSpecTestMixinV1(AsyncIntegrationTest):
             f"find {count} {event} event(s)",
         )
 
+    def _monitored_servers(self, client):
+        """The addresses of the servers that the client monitors, once none of them is Unknown."""
+        servers = client._topology.description.server_descriptions()
+        if not servers or any(sd.server_type == SERVER_TYPE.Unknown for sd in servers.values()):
+            return None
+        return list(servers)
+
+    async def _testOperation_waitForWireMessages(self, spec):
+        """Run the waitForWireMessages test operation.
+
+        Wait for a number of messages to be written, or fail.
+        """
+        client_id, source, count = spec["client"], spec["source"], spec["count"]
+        self.assertIn(
+            client_id, self.entity_map._wire_recorders, "client observes no wire messages"
+        )
+        recorder = self.entity_map._wire_recorders[client_id]
+        client = self.entity_map[client_id]
+
+        def satisfied():
+            if source == "application":
+                return len(recorder.messages("application")) >= count
+            servers = self._monitored_servers(client)
+            return bool(servers) and all(
+                len(recorder.messages(source, a)) >= count for a in servers
+            )
+
+        await async_wait_until(satisfied, f"find {count} {source} wire message(s)")
+
+    async def check_wire_messages(self, expected_wire_messages):
+        for expected in expected_wire_messages:
+            client_id = expected["client"]
+            self.assertIn(
+                client_id, self.entity_map._wire_recorders, "client observes no wire messages"
+            )
+            recorder = self.entity_map._wire_recorders[client_id]
+            source = expected.get("source")
+            if source is None:
+                self.assertFalse(
+                    recorder.sources & {"monitor", "rtt"},
+                    "source is required if the client observes monitor or rtt messages",
+                )
+            ignore_extra = expected.get("ignoreExtraMessages", False)
+            if source in ("monitor", "rtt"):
+                client = self.entity_map[client_id]
+                await async_wait_until(
+                    lambda client=client: self._monitored_servers(client) is not None,
+                    "find the type of every server",
+                )
+                servers = self._monitored_servers(client)
+                self.assertTrue(servers, "the topology description lists no servers")
+                for address in servers:
+                    assert_messages_match(
+                        self, expected["messages"], recorder.messages(source, address), ignore_extra
+                    )
+            else:
+                assert_messages_match(
+                    self, expected["messages"], recorder.messages(source), ignore_extra
+                )
+
     async def _testOperation_wait(self, spec):
         """Run the "wait" test operation."""
         await asyncio.sleep(spec["ms"] / 1000.0)
@@ -1582,6 +1742,14 @@ class UnifiedSpecTestMixinV1(AsyncIntegrationTest):
             expect_events = spec["expectEvents"]
             self.assertTrue(expect_events, "expectEvents must be non-empty")
             self.check_events(expect_events)
+
+        # every recorded wire message must be well formed, whether or not the test asserts on it
+        for recorder in self.entity_map._wire_recorders.values():
+            recorder.check_well_formed()
+
+        # process expectWireMessages
+        if "expectWireMessages" in spec:
+            await self.check_wire_messages(spec["expectWireMessages"])
 
         # process outcome
         await self.verify_outcome(spec.get("outcome", []))
