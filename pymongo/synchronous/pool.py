@@ -136,6 +136,9 @@ class Connection(_AgnosticBaseConnection["Pool"]):
             self.performed_handshake = True
             # The MongoDB Handshake spec requires backpressure in the handshake request only.
             cmd["backpressure"] = "2"
+            # The MongoDB Handshake spec requires helloOk in the initial handshake, whether it is hello or legacy hello.
+            # The server remembers it for the connection.
+            cmd["helloOk"] = True
             cmd["client"] = self.opts.metadata
             if self.compression_settings:
                 cmd["compression"] = self.compression_settings.compressors
@@ -181,8 +184,8 @@ class Connection(_AgnosticBaseConnection["Pool"]):
             hello.logical_session_timeout_minutes is not None and hello.is_readable
         )
         self.logical_session_timeout_minutes: int | None = hello.logical_session_timeout_minutes
-        # hello_ok is set from helloOk, which is only returned from ismaster
-        # don't overwrite this when connection switches to hello
+        # hello_ok is set from helloOk, which the server only returns in reply to a command that carried it,
+        # that is, the handshake. Don't overwrite this when connection switches to hello.
         self.hello_ok = self.hello_ok or hello.hello_ok
         self.is_repl = hello.server_type in (
             SERVER_TYPE.RSPrimary,
