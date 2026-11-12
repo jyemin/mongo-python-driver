@@ -9,6 +9,8 @@ Changes in Version 4.20.0 (2026/XX/XX)
 - The legacy hello command that PyMongo sends to servers that do not support
   ``hello`` is now spelled ``isMaster``, the casing that the MongoDB Handshake
   specification calls correct, in place of ``ismaster``.
+- PyMongo now sends ``backpressure`` only in the handshake request, not in every ``hello`` and legacy hello
+  command that a monitor sends.
 - Removed the beta ``QueryType.PREFIXPREVIEW``, ``QueryType.SUFFIXPREVIEW``,
   and ``QueryType.SUBSTRINGPREVIEW`` query types. Use
   :attr:`~pymongo.encryption.QueryType.PREFIX`,

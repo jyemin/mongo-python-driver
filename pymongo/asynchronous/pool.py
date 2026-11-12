@@ -132,9 +132,10 @@ class AsyncConnection(_AgnosticBaseConnection["Pool"]):
         cmd = self.hello_cmd()
         performing_handshake = not self.performed_handshake
         awaitable = False
-        cmd["backpressure"] = "2"
         if performing_handshake:
             self.performed_handshake = True
+            # The MongoDB Handshake spec requires backpressure in the handshake request only.
+            cmd["backpressure"] = "2"
             cmd["client"] = self.opts.metadata
             if self.compression_settings:
                 cmd["compression"] = self.compression_settings.compressors
